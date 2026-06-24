@@ -1,0 +1,16 @@
+<configuration>
+	<!-- All logging goes to stderr; stdout is reserved for MCP JSON-RPC traffic. -->
+	<appender name="STDERR" class="ch.qos.logback.core.ConsoleAppender">
+		<target>System.err</target>
+		<encoder>
+			<pattern>%date{HH:mm:ss.SSS} [%thread] %-5level %logger{32} - %msg%n</pattern>
+		</encoder>
+	</appender>
+
+	<root level="INFO">
+		<appender-ref ref="STDERR" />
+	</root>
+
+	<logger name="jadx" level="INFO" />
+	<logger name="io.modelcontextprotocol" level="INFO" />
+</configuration>
