@@ -2,12 +2,14 @@ package jadx.gui.settings.font;
 
 import java.awt.Font;
 
+import javax.swing.JLabel;
 import javax.swing.UIManager;
 
 import com.formdev.flatlaf.FlatLaf;
 import com.formdev.flatlaf.fonts.inter.FlatInterFont;
 import com.formdev.flatlaf.fonts.jetbrains_mono.FlatJetBrainsMonoFont;
 
+import jadx.commons.app.JadxSystemInfo;
 import jadx.gui.settings.JadxSettingsData;
 import jadx.gui.utils.UiUtils;
 
@@ -19,9 +21,13 @@ import static jadx.gui.utils.FontUtils.getCompositeFont;
 public class FontSettings {
 
 	static {
-		FlatInterFont.install();
-		FlatJetBrainsMonoFont.install();
-		FlatLaf.setPreferredMonospacedFontFamily(FlatJetBrainsMonoFont.FAMILY);
+		if (JadxSystemInfo.IS_MAC) {
+			// workaround: bundled fonts don't support CJK chars (and composite fonts?) on macOS
+		} else {
+			FlatInterFont.install();
+			FlatJetBrainsMonoFont.install();
+			FlatLaf.setPreferredMonospacedFontFamily(FlatJetBrainsMonoFont.FAMILY);
+		}
 	}
 
 	private final FontAdapter uiFontAdapter;
@@ -32,9 +38,17 @@ public class FontSettings {
 	private boolean applyUiZoomToFonts;
 
 	public FontSettings() {
-		int defFontSize = 13;
-		Font defUiFont = getCompositeFont(FlatInterFont.FAMILY, Font.PLAIN, defFontSize);
-		Font defCodeFont = getCompositeFont(FlatJetBrainsMonoFont.FAMILY, Font.PLAIN, defFontSize);
+		Font defUiFont;
+		Font defCodeFont;
+		if (JadxSystemInfo.IS_MAC) {
+			Font defaultFont = new JLabel().getFont();
+			defUiFont = defaultFont;
+			defCodeFont = defaultFont;
+		} else {
+			int defFontSize = 13;
+			defUiFont = getCompositeFont(FlatInterFont.FAMILY, Font.PLAIN, defFontSize);
+			defCodeFont = getCompositeFont(FlatJetBrainsMonoFont.FAMILY, Font.PLAIN, defFontSize);
+		}
 		uiFontAdapter = new FontAdapter(defUiFont);
 		codeFontAdapter = new FontAdapter(defCodeFont);
 		smaliFontAdapter = new FontAdapter(defCodeFont);

@@ -8,16 +8,18 @@ import java.util.Locale
 plugins {
 	id("com.github.ben-manes.versions") version "0.54.0"
 	id("se.patrikerdes.use-latest-versions") version "0.2.19"
-	id("com.diffplug.spotless") version "8.7.0"
+	id("com.diffplug.spotless") version "8.8.0"
 }
 
 val jadxEnv = loadEnv(file("$rootDir/.env"))
 
-val jadxVersion by extra { jadxEnv["JADX_VERSION"] ?: "dev" }
+val jadxVersion = jadxEnv["JADX_VERSION"] ?: "dev"
+extra.set("jadxVersion", jadxVersion)
 println("jadx version: $jadxVersion")
 version = jadxVersion
 
-val jadxBuildJavaVersion by extra { getBuildJavaVersion() }
+val jadxBuildJavaVersion = getBuildJavaVersion()
+extra.set("jadxBuildJavaVersion", jadxBuildJavaVersion)
 
 fun getBuildJavaVersion(): Int? {
 	val envVarName = "JADX_BUILD_JAVA_VERSION"
@@ -30,7 +32,8 @@ fun getBuildJavaVersion(): Int? {
 }
 
 // control ErrorProne checks level, can be: off, warn, error
-val jadxBuildChecksMode: String by extra { getBuildChecksMode() }
+val jadxBuildChecksMode = getBuildChecksMode()
+extra.set("jadxBuildChecksMode", jadxBuildChecksMode)
 
 fun getBuildChecksMode(): String {
 	val buildChecksMode = jadxEnv["JADX_BUILD_CHECKS_MODE"]?.lowercase() ?: "off"
@@ -126,98 +129,123 @@ fun loadEnv(file: File): Map<String, String> {
 	return envMap
 }
 
-val distWinConfiguration: Configuration by configurations.creating {
-	isCanBeConsumed = false
-}
-val distWinWithJreConfiguration: Configuration by configurations.creating {
-	isCanBeConsumed = false
-}
+val distWinConfiguration =
+	configurations.create("distWinConfiguration") {
+		isCanBeConsumed = false
+	}
+val distWinWithJreConfiguration =
+	configurations.create("distWinWithJreConfiguration") {
+		isCanBeConsumed = false
+	}
+val distMacConfiguration =
+	configurations.create("distMacConfiguration") {
+		isCanBeConsumed = false
+	}
 dependencies {
 	distWinConfiguration(project(":jadx-gui", "distWinConfiguration"))
 	distWinWithJreConfiguration(project(":jadx-gui", "distWinWithJreConfiguration"))
+	distMacConfiguration(project(":jadx-gui", "distMacConfiguration"))
 }
 
-val copyArtifacts by tasks.registering(Copy::class) {
-	val jarCliPattern = "jadx-cli-(.*)-all.jar".toPattern()
-	from(tasks.getByPath(":jadx-cli:installShadowDist")) {
-		exclude("**/*.jar")
-		filter { line ->
-			jarCliPattern
-				.matcher(line)
-				.replaceAll("jadx-$1-all.jar")
-				.replace("-jar \"\\\"\$CLASSPATH\\\"\"", "-cp \"\\\"\$CLASSPATH\\\"\" jadx.cli.JadxCLI")
-				.replace("-jar \"%CLASSPATH%\"", "-cp \"%CLASSPATH%\" jadx.cli.JadxCLI")
+val copyArtifacts =
+	tasks.register<Copy>("copyArtifacts") {
+		val jarCliPattern = "jadx-cli-(.*)-all.jar".toPattern()
+		from(tasks.getByPath(":jadx-cli:installShadowDist")) {
+			exclude("**/*.jar")
+			filter { line ->
+				jarCliPattern
+					.matcher(line)
+					.replaceAll("jadx-$1-all.jar")
+					.replace("-jar \"\\\"\$CLASSPATH\\\"\"", "-cp \"\\\"\$CLASSPATH\\\"\" jadx.cli.JadxCLI")
+					.replace("-jar \"%CLASSPATH%\"", "-cp \"%CLASSPATH%\" jadx.cli.JadxCLI")
+			}
 		}
+		val jarGuiPattern = "jadx-gui-(.*)-all.jar".toPattern()
+		from(tasks.getByPath(":jadx-gui:installShadowDist")) {
+			exclude("**/*.jar")
+			filter { line -> jarGuiPattern.matcher(line).replaceAll("jadx-$1-all.jar") }
+		}
+		from(tasks.getByPath(":jadx-gui:installShadowDist")) {
+			include("**/*.jar")
+			rename("jadx-gui-(.*)-all.jar", "jadx-$1-all.jar")
+		}
+		from(layout.projectDirectory) {
+			include("README.md")
+			include("LICENSE")
+		}
+		into(layout.buildDirectory.dir("jadx"))
+		duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 	}
-	val jarGuiPattern = "jadx-gui-(.*)-all.jar".toPattern()
-	from(tasks.getByPath(":jadx-gui:installShadowDist")) {
-		exclude("**/*.jar")
-		filter { line -> jarGuiPattern.matcher(line).replaceAll("jadx-$1-all.jar") }
-	}
-	from(tasks.getByPath(":jadx-gui:installShadowDist")) {
-		include("**/*.jar")
-		rename("jadx-gui-(.*)-all.jar", "jadx-$1-all.jar")
-	}
-	from(layout.projectDirectory) {
-		include("README.md")
-		include("LICENSE")
-	}
-	into(layout.buildDirectory.dir("jadx"))
-	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-}
 
-val pack by tasks.registering(Zip::class) {
-	from(copyArtifacts)
-	archiveFileName.set("jadx-$jadxVersion.zip")
-	destinationDirectory.set(layout.buildDirectory)
-	eachFile {
-		if (path == "bin/jadx" || path == "bin/jadx-gui") {
-			permissions {
-				unix("rwxr-xr-x")
+val pack =
+	tasks.register<Zip>("pack") {
+		from(copyArtifacts)
+		archiveFileName.set("jadx-$jadxVersion.zip")
+		destinationDirectory.set(layout.buildDirectory)
+		eachFile {
+			if (path == "bin/jadx" || path == "bin/jadx-gui") {
+				permissions {
+					unix("rwxr-xr-x")
+				}
 			}
 		}
 	}
-}
 
-val distWin by tasks.registering(Zip::class) {
-	group = "jadx"
-	description = "Build Windows bundle"
+val distWin =
+	tasks.register<Zip>("distWin") {
+		group = "jadx"
+		description = "Build Windows bundle"
 
-	from(distWinConfiguration)
+		from(distWinConfiguration)
 
-	destinationDirectory.set(layout.buildDirectory.dir("distWin"))
-	archiveFileName.set("jadx-gui-$jadxVersion-win.zip")
-	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-}
+		destinationDirectory.set(layout.buildDirectory.dir("distWin"))
+		archiveFileName.set("jadx-gui-$jadxVersion-win.zip")
+		duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	}
 
-val distWinWithJre by tasks.registering(Zip::class) {
-	description = "Build Windows with JRE bundle"
+val distWinWithJre =
+	tasks.register<Zip>("distWinWithJre") {
+		description = "Build Windows with JRE bundle"
 
-	from(distWinWithJreConfiguration)
+		from(distWinWithJreConfiguration)
 
-	destinationDirectory.set(layout.buildDirectory.dir("distWinWithJre"))
-	archiveFileName.set("jadx-gui-$jadxVersion-with-jre-win.zip")
-	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-}
+		destinationDirectory.set(layout.buildDirectory.dir("distWinWithJre"))
+		archiveFileName.set("jadx-gui-$jadxVersion-with-jre-win.zip")
+		duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	}
 
-val dist by tasks.registering {
-	group = "jadx"
-	description = "Build jadx distribution zip bundles"
+val distMac =
+	tasks.register<Copy>("distMac") {
+		group = "jadx"
+		description = "Build macOS DMG bundle (with bundled JRE)"
 
-	dependsOn(pack)
+		from(distMacConfiguration)
 
-	val os = DefaultNativePlatform.getCurrentOperatingSystem()
-	if (os.isWindows) {
-		if (project.hasProperty("bundleJRE")) {
-			println("Build win bundle with JRE")
-			dependsOn(distWinWithJre)
-		} else {
-			dependsOn(distWin)
+		into(layout.buildDirectory.dir("distMac"))
+	}
+
+val dist =
+	tasks.register("dist") {
+		group = "jadx"
+		description = "Build jadx distribution zip bundles"
+
+		dependsOn(pack)
+
+		val os = DefaultNativePlatform.getCurrentOperatingSystem()
+		if (os.isWindows) {
+			if (project.hasProperty("bundleJRE")) {
+				println("Build win bundle with JRE")
+				dependsOn(distWinWithJre)
+			} else {
+				dependsOn(distWin)
+			}
+		} else if (os.isMacOsX) {
+			dependsOn(distMac)
 		}
 	}
-}
 
-val cleanBuildDir by tasks.registering(Delete::class) {
-	delete(layout.buildDirectory)
-}
+val cleanBuildDir =
+	tasks.register<Delete>("cleanBuildDir") {
+		delete(layout.buildDirectory)
+	}
 tasks.getByName("clean").dependsOn(cleanBuildDir)

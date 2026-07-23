@@ -532,6 +532,7 @@ public class MainWindow extends JFrame {
 	}
 
 	private void loadFiles(Runnable onFinish) {
+		project.verifyFiles();
 		if (project.getFilePaths().isEmpty()) {
 			tabsController.selectTab(new StartPageNode());
 			onFinish.run();
@@ -1010,7 +1011,7 @@ public class MainWindow extends JFrame {
 		return null;
 	}
 
-	public void toggleHexViewMenu() {
+	public void updateHexViewMenuEnabled() {
 		hexViewerMenu.setEnabled(getCurrentHexViewTab() != null);
 	}
 

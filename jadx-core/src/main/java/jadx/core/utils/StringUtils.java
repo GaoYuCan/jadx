@@ -267,7 +267,7 @@ public class StringUtils {
 		return str != null && !str.isEmpty();
 	}
 
-	public static boolean isEmpty(String str) {
+	public static boolean isEmpty(@Nullable String str) {
 		return str == null || str.isEmpty();
 	}
 

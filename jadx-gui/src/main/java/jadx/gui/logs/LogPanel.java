@@ -94,7 +94,7 @@ public class LogPanel extends JPanel {
 			textPane.setText("");
 		});
 
-		JButton dockBtn = new JButton(NLS.str(settings.isDockLogViewer() ? "log_viewer.undock" : "log_viewer.dock"));
+		JButton dockBtn = new JButton(settings.isDockLogViewer() ? NLS.str("log_viewer.undock") : NLS.str("log_viewer.dock"));
 		dockBtn.addActionListener(ev -> dockAction.run());
 
 		JButton hideBtn = new JButton(NLS.str("log_viewer.hide"));

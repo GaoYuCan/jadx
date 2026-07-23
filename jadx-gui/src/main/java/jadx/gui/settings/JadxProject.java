@@ -5,6 +5,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -16,8 +17,6 @@ import java.util.stream.Collectors;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import com.google.gson.Gson;
 
@@ -40,14 +39,17 @@ import jadx.gui.settings.data.SaveOptionEnum;
 import jadx.gui.settings.data.TabViewState;
 import jadx.gui.ui.MainWindow;
 import jadx.gui.ui.codearea.EditorViewState;
+import jadx.gui.ui.filedialog.FileDialogWrapper;
+import jadx.gui.ui.filedialog.FileOpenMode;
+import jadx.gui.utils.NLS;
 import jadx.gui.utils.RelativePathTypeAdapter;
+import jadx.gui.utils.ui.ActionMessageBox;
+import jadx.gui.utils.ui.ActionMessageBox.Action;
 
 import static jadx.core.utils.GsonUtils.defaultGsonBuilder;
 import static jadx.core.utils.GsonUtils.interfaceReplace;
 
 public class JadxProject {
-	private static final Logger LOG = LoggerFactory.getLogger(JadxProject.class);
-
 	public static final String PROJECT_EXTENSION = "jadx";
 
 	private static final int SEARCH_HISTORY_LIMIT = 30;
@@ -56,6 +58,7 @@ public class JadxProject {
 	private final transient TabStateViewAdapter tabStateViewAdapter = new TabStateViewAdapter();
 
 	private transient String name = "New Project";
+	private transient String inputsHash = "";
 	private transient @Nullable Path projectPath;
 
 	private transient boolean initial = true;
@@ -103,7 +106,6 @@ public class JadxProject {
 	private void setProjectPath(@NotNull Path projectPath) {
 		this.projectPath = projectPath;
 		this.name = CommonFileUtils.removeFileExtension(projectPath.getFileName().toString());
-		changed();
 	}
 
 	public List<Path> getFilePaths() {
@@ -117,25 +119,39 @@ public class JadxProject {
 		if (files.isEmpty()) {
 			data.setFiles(files);
 			name = "";
+			inputsHash = "";
 		} else {
-			Collections.sort(files);
-			data.setFiles(files);
-			StringJoiner joiner = new StringJoiner("_");
-			for (Path p : files) {
-				Path fileNamePart = p.getFileName();
-				if (fileNamePart == null) {
-					joiner.add(p.toString());
-					continue;
-				}
-				String fileName = fileNamePart.toString();
-				if (!fileName.endsWith(".jadx.kts")) {
-					joiner.add(CommonFileUtils.removeFileExtension(fileName));
-				}
-			}
-			String joinedName = joiner.toString();
-			name = StringUtils.abbreviate(joinedName, 100);
+			List<Path> inputs = verifyInputFiles(files);
+			Collections.sort(inputs);
+			data.setFiles(inputs);
+			name = buildProjectName(inputs);
+			inputsHash = FileUtils.buildInputsHash(inputs);
 		}
 		changed();
+	}
+
+	public void verifyFiles() {
+		setFilePaths(verifyInputFiles(getFilePaths()));
+	}
+
+	private static String buildProjectName(List<Path> files) {
+		StringJoiner joiner = new StringJoiner("_");
+		for (Path p : files) {
+			Path fileNamePart = p.getFileName();
+			if (fileNamePart == null) {
+				joiner.add(p.toString());
+				continue;
+			}
+			String fileName = fileNamePart.toString();
+			if (!fileName.endsWith(".jadx.kts")) {
+				joiner.add(CommonFileUtils.removeFileExtension(fileName));
+			}
+		}
+		return StringUtils.abbreviate(joiner.toString(), 100);
+	}
+
+	public String getInputsHash() {
+		return inputsHash;
 	}
 
 	public void setTreeExpansions(List<String> list) {
@@ -321,6 +337,7 @@ public class JadxProject {
 		JadxProject project = new JadxProject(mainWindow, projectData);
 		project.saved = true;
 		project.setProjectPath(path);
+		project.setFilePaths(project.getFilePaths());
 		return project;
 	}
 
@@ -331,6 +348,36 @@ public class JadxProject {
 		} catch (Exception e) {
 			throw new JadxRuntimeException("Failed to load project file: " + path, e);
 		}
+	}
+
+	private List<Path> verifyInputFiles(List<Path> inputFiles) {
+		List<Path> files = new ArrayList<>(inputFiles);
+		for (Path p : inputFiles) {
+			if (!Files.exists(p)) {
+				files.remove(p);
+				new ActionMessageBox(mainWindow,
+						NLS.str("project.dialog_title"),
+						NLS.str("project.file_not_found") + ":\n" + p.toAbsolutePath(),
+						new Action(NLS.str("project.file_not_found.exclude"), () -> {
+							// default action, file already excluded
+						}),
+						new Action(NLS.str("project.file_not_found.open_another"), () -> {
+							files.addAll(new FileDialogWrapper(mainWindow, FileOpenMode.ADD).show());
+						})).show();
+			}
+		}
+		if (files.isEmpty()) {
+			new ActionMessageBox(mainWindow,
+					NLS.str("project.dialog_title"),
+					NLS.str("project.empty"),
+					new Action(NLS.str("project.empty.add_files"), () -> {
+						files.addAll(new FileDialogWrapper(mainWindow, FileOpenMode.ADD).show());
+					}),
+					new Action(NLS.str("project.empty.close"), () -> {
+						// empty project will not open
+					})).show();
+		}
+		return files;
 	}
 
 	private static Gson buildGson(Path basePath) {

@@ -6,24 +6,24 @@ import java.util.stream.Stream;
 import jadx.gui.utils.NLS;
 
 public enum CodeCacheMode {
-	MEMORY("preferences.codeCacheMode.memory", "preferences.codeCacheMode.memory.desc"),
-	DISK_WITH_CACHE("preferences.codeCacheMode.diskWithCache", "preferences.codeCacheMode.diskWithCache.desc"),
-	DISK("preferences.codeCacheMode.disk", "preferences.codeCacheMode.disk.desc");
+	MEMORY(NLS.str("preferences.codeCacheMode.memory"), NLS.str("preferences.codeCacheMode.memory.desc")),
+	DISK_WITH_CACHE(NLS.str("preferences.codeCacheMode.diskWithCache"), NLS.str("preferences.codeCacheMode.diskWithCache.desc")),
+	DISK(NLS.str("preferences.codeCacheMode.disk"), NLS.str("preferences.codeCacheMode.disk.desc"));
 
-	private final String labelKey;
-	private final String descKey;
+	private final String label;
+	private final String desc;
 
-	CodeCacheMode(String labelKey, String descKey) {
-		this.labelKey = labelKey;
-		this.descKey = descKey;
+	CodeCacheMode(String label, String desc) {
+		this.label = label;
+		this.desc = desc;
 	}
 
 	public String getLocalizedName() {
-		return NLS.str(labelKey);
+		return label;
 	}
 
 	public String getDesc() {
-		return NLS.str(descKey);
+		return desc;
 	}
 
 	@Override

@@ -61,7 +61,14 @@ public class JadxZipSecurity implements IJadxZipSecurity {
 		// Path traversal check as presented on
 		// https://www.heise.de/en/background/Secure-Coding-Best-practices-for-using-Java-NIO-against-path-traversal-9996787.html
 		try {
-			Path entryPath = CWD.resolve(entryName).normalize();
+			Path entryPathPart = Paths.get(entryName).normalize();
+			if (entryPathPart.startsWith(CWD) || entryPathPart.isAbsolute()) {
+				// reject entry name if it is already a full path to CWD, otherwise next check will always pass
+				// reject absolute path as well
+				LOG.error("Path traversal attack detected (absolute path) in entry: {}", entryName);
+				return false;
+			}
+			Path entryPath = CWD.resolve(entryPathPart).normalize();
 			if (entryPath.startsWith(CWD)) {
 				return true;
 			}

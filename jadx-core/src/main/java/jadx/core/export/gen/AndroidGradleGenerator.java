@@ -1,13 +1,13 @@
 package jadx.core.export.gen;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.regex.Pattern;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +15,7 @@ import org.slf4j.LoggerFactory;
 import jadx.api.ResourceFile;
 import jadx.api.ResourceType;
 import jadx.api.security.IJadxSecurity;
+import jadx.api.security.SanitizeType;
 import jadx.core.dex.nodes.RootNode;
 import jadx.core.export.ExportGradleType;
 import jadx.core.export.GradleInfoStorage;
@@ -29,7 +30,6 @@ import jadx.core.xmlgen.ResContainer;
 
 public class AndroidGradleGenerator implements IExportGradleGenerator {
 	private static final Logger LOG = LoggerFactory.getLogger(AndroidGradleGenerator.class);
-	private static final Pattern ILLEGAL_GRADLE_CHARS = Pattern.compile("[/\\\\:>\"?*|]");
 
 	private final RootNode root;
 	private final File projectDir;
@@ -134,16 +134,16 @@ public class AndroidGradleGenerator implements IExportGradleGenerator {
 	}
 
 	private void saveProjectBuildGradle() throws IOException {
-		TemplateFile tmpl = TemplateFile.fromResources("/export/android/build.gradle.tmpl");
+		TemplateFile tmpl = loadGradleTemplate("/export/android/build.gradle.tmpl");
 		tmpl.save(new File(projectDir, "build.gradle"));
 	}
 
 	private void saveSettingsGradle() throws IOException {
-		TemplateFile tmpl = TemplateFile.fromResources("/export/android/settings.gradle.tmpl");
+		TemplateFile tmpl = loadGradleTemplate("/export/android/settings.gradle.tmpl");
 		String appName = applicationParams.getApplicationLabel();
 		String projectName;
 		if (appName != null) {
-			projectName = ILLEGAL_GRADLE_CHARS.matcher(appName).replaceAll("");
+			projectName = appName;
 		} else {
 			projectName = GradleGeneratorTools.guessProjectName(root);
 		}
@@ -156,7 +156,7 @@ public class AndroidGradleGenerator implements IExportGradleGenerator {
 		String appPackage = Utils.getOrElse(root.getAppPackage(), "UNKNOWN");
 		int minSdkVersion = Utils.getOrElse(applicationParams.getMinSdkVersion(), 0);
 
-		TemplateFile tmpl = TemplateFile.fromResources("/export/android/app.build.gradle.tmpl");
+		TemplateFile tmpl = loadGradleTemplate("/export/android/app.build.gradle.tmpl");
 		tmpl.add("applicationId", appPackage);
 		tmpl.add("minSdkVersion", minSdkVersion);
 		tmpl.add("compileSdkVersion", applicationParams.getCompileSdkVersion());
@@ -171,13 +171,20 @@ public class AndroidGradleGenerator implements IExportGradleGenerator {
 		String pkg = Utils.getOrElse(root.getAppPackage(), "UNKNOWN");
 		int minSdkVersion = Utils.getOrElse(applicationParams.getMinSdkVersion(), 0);
 
-		TemplateFile tmpl = TemplateFile.fromResources("/export/android/lib.build.gradle.tmpl");
+		TemplateFile tmpl = loadGradleTemplate("/export/android/lib.build.gradle.tmpl");
 		tmpl.add("packageId", pkg);
 		tmpl.add("minSdkVersion", minSdkVersion);
 		tmpl.add("compileSdkVersion", applicationParams.getCompileSdkVersion());
 		tmpl.add("additionalOptions", genAdditionalAndroidPluginOptions(minSdkVersion));
 
 		tmpl.save(new File(baseDir, "build.gradle"));
+	}
+
+	private TemplateFile loadGradleTemplate(String templatePath) throws FileNotFoundException {
+		TemplateFile tmpl = TemplateFile.fromResources(templatePath);
+		IJadxSecurity security = root.getArgs().getSecurity();
+		tmpl.setValueSanitizer(str -> security.sanitizeString(str, SanitizeType.GRADLE_GROOVY));
+		return tmpl;
 	}
 
 	private String genAdditionalAndroidPluginOptions(int minSdkVersion) {
