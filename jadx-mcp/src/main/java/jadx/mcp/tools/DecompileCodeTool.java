@@ -21,11 +21,14 @@ import jadx.mcp.format.LineNumberPrefixer;
 import jadx.mcp.format.RefEntry;
 import jadx.mcp.format.RefTable;
 import jadx.mcp.format.RefTableBuilder;
+import jadx.mcp.format.VariableEntry;
+import jadx.mcp.format.VariableTableBuilder;
 import jadx.mcp.util.SchemaBuilder;
 import jadx.mcp.util.ToolException;
 
 /**
- * {@code decompile_code} tool: returns Java source for a class or a single method, plus a sidecar refs table.
+ * {@code decompile_code} tool: returns Java source for a class or a single method, plus a sidecar
+ * refs table.
  * <p>
  * See {@link jadx.mcp.format.RefTableBuilder} for the symbol-resolution model and
  * {@link jadx.mcp.format.InlineRefAnnotator} for the optional inline annotation format.
@@ -51,7 +54,8 @@ public final class DecompileCodeTool extends AbstractTool {
 				+ "columns). When `annotate` is `inline` or `both`, the source itself is decorated with "
 				+ "`/*->Target#Rxx*/` block comments pinned to each call so deeply nested calls remain "
 				+ "unambiguous. `annotate=off` returns just the source. The line numbers in `code` and in `refs` "
-				+ "use the same coordinate space as `search_code` and `xrefs_to`.";
+				+ "use the same coordinate space as `search_code` and `xrefs_to`. Set `include_variables=true` "
+				+ "to receive a `variables` sidecar containing precise `variable_id` handles for the `rename` tool.";
 	}
 
 	@Override
@@ -61,6 +65,7 @@ public final class DecompileCodeTool extends AbstractTool {
 				.enumString("annotate", "How to surface symbol references. Default 'sidecar'.", false,
 						"off", "sidecar", "inline", "both")
 				.bool("line_numbers", "Add a line-number gutter to `code`. Default true.", false)
+				.bool("include_variables", "Include renameable variable handles in a `variables` sidecar. Default false.", false)
 				.build();
 	}
 
@@ -69,6 +74,7 @@ public final class DecompileCodeTool extends AbstractTool {
 		Target target = TargetParser.parse(requireString(args, "target"));
 		String annotate = optString(args, "annotate", "sidecar");
 		boolean lineNumbers = optBool(args, "line_numbers", true);
+		boolean includeVariables = optBool(args, "include_variables", false);
 
 		return session.read(decompiler -> {
 			JavaClass javaClass = TargetResolver.resolveClass(session, target);
@@ -107,6 +113,22 @@ public final class DecompileCodeTool extends AbstractTool {
 				for (RefEntry e : refTable.entries()) {
 					if (e.line() >= slice.firstLine && e.line() <= endLine) {
 						sliceRefs.add(e);
+					}
+				}
+			}
+
+			List<VariableEntry> sliceVariables = List.of();
+			if (includeVariables) {
+				List<VariableEntry> allVariables = VariableTableBuilder.build(decompiler, javaClass);
+				if (target.isClass()) {
+					sliceVariables = allVariables;
+				} else {
+					int endLine = slice.firstLine + countLines(slice.rawCode) - 1;
+					sliceVariables = new ArrayList<>();
+					for (VariableEntry variable : allVariables) {
+						if (variable.line() >= slice.firstLine && variable.line() <= endLine) {
+							sliceVariables.add(variable);
+						}
 					}
 				}
 			}
@@ -151,6 +173,9 @@ public final class DecompileCodeTool extends AbstractTool {
 			} else if (wantRefs && "both".equals(annotate)) {
 				result.put("refs", refsAsMaps(sliceRefs));
 			}
+			if (includeVariables) {
+				result.put("variables", variablesAsMaps(sliceVariables));
+			}
 			return result;
 		});
 	}
@@ -174,6 +199,21 @@ public final class DecompileCodeTool extends AbstractTool {
 			}
 			m.put("snippet", e.snippet());
 			out.add(m);
+		}
+		return out;
+	}
+
+	private static List<Map<String, Object>> variablesAsMaps(List<VariableEntry> variables) {
+		List<Map<String, Object>> out = new ArrayList<>(variables.size());
+		for (VariableEntry variable : variables) {
+			Map<String, Object> row = new LinkedHashMap<>();
+			row.put("variable_id", variable.variableId());
+			row.put("name", variable.name());
+			row.put("type", variable.type());
+			row.put("line", variable.line());
+			row.put("col", variable.col());
+			row.put("method_target", variable.methodTarget());
+			out.add(row);
 		}
 		return out;
 	}
@@ -203,7 +243,8 @@ public final class DecompileCodeTool extends AbstractTool {
 		if (defPos <= 0) {
 			return -1;
 		}
-		// walk up annotations to find the enclosing DECLARATION for this method (covers comments/annotations)
+		// walk up annotations to find the enclosing DECLARATION for this method (covers
+		// comments/annotations)
 		ICodeAnnotation start = codeInfo.getCodeMetadata().searchUp(defPos - 1, (pos, ann) -> {
 			if (ann.getAnnType() == ICodeAnnotation.AnnType.DECLARATION) {
 				ICodeNodeRef inner = ((NodeDeclareRef) ann).getNode();

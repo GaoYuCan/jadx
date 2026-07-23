@@ -49,6 +49,7 @@ dependencies {
 			.getByName("test")
 			.output,
 	)
+	testImplementation(project(":jadx-gui"))
 }
 
 application {

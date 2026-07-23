@@ -68,8 +68,10 @@ jadx-mcp/build/libs/jadx-mcp-dev-all.jar
 
 | 工具 | 用途 |
 | --- | --- |
-| `open_file` | 加载或替换当前项目。支持 `.apk`、`.dex`、`.jar`、`.class`、`.smali`、`.zip`、`.aar`、`.arsc`、`.aab`、`.xapk`、`.apkm`。再次调用会先关闭旧项目并清理缓存。 |
+| `open_file` | 加载或替换当前项目。支持 `.apk`、`.dex`、`.jar`、`.class`、`.smali`、`.zip`、`.aar`、`.arsc`、`.aab`、`.xapk`、`.apkm`、`.jadx`。再次调用会先关闭旧项目并清理缓存。 |
 | `close_file` | 关闭当前项目并释放缓存。重复调用也是安全的。 |
+| `current_project` | 返回当前是否已加载项目，以及主输入文件的绝对路径、文件名、扩展名、大小和最后修改时间。 |
+| `save_project` | 把主输入文件和 MCP 中产生的 rename 记录保存为 jadx GUI 可打开的 v2 `.jadx` 项目文件。 |
 
 ### 浏览与导航
 
@@ -83,7 +85,7 @@ jadx-mcp/build/libs/jadx-mcp-dev-all.jar
 
 | 工具 | 用途 |
 | --- | --- |
-| `decompile_code` | 反编译一个类或一个方法为 Java 源码。默认返回带行号的源码和旁路 `refs` 数组；`refs` 中的 `ref_id` 可交给 `resolve_ref`。 |
+| `decompile_code` | 反编译一个类或一个方法为 Java 源码。默认返回带行号的源码和旁路 `refs` 数组；`refs` 中的 `ref_id` 可交给 `resolve_ref`。设置 `include_variables=true` 会额外返回可用于 rename 的变量句柄。 |
 | `disassemble` | 反汇编一个类或一个方法为 smali。 |
 | `decompile_xml` | 按资源路径解码 Android XML 或文本资源。 |
 | `resolve_ref` | 把 `decompile_code` 返回的 `(class_fqn, ref_id)` 解析为具体的类、方法或字段。 |
@@ -110,6 +112,7 @@ jadx-mcp/build/libs/jadx-mcp-dev-all.jar
 | `xrefs_to` | 查询类、方法、字段的交叉引用。字段引用会区分 `read`、`write`、`init`。 |
 | `method_overrides` | 从一个方法向下查找子类或子接口中的重写，相当于 GUI 里的 Define Plus。 |
 | `inheritance_tree` | 查询类型层级。`up` 返回父类链和接口；`down` 返回子类或接口实现者；`transitive=true` 返回完整闭包。 |
+| `rename` | 对类、字段、方法或变量添加或更新用户重命名。 |
 
 ## 字节码优先的默认设置
 

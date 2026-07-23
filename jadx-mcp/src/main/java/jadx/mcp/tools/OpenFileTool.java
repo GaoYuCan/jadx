@@ -1,9 +1,12 @@
 package jadx.mcp.tools;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -13,14 +16,17 @@ import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
 import jadx.mcp.JadxMcpArgs;
 import jadx.mcp.JadxSession;
+import jadx.mcp.project.JadxProjectIO;
 import jadx.mcp.util.SchemaBuilder;
 import jadx.mcp.util.ToolException;
 
 /**
  * {@code open_file} tool: load (or replace) the project the rest of the tools operate on.
  * <p>
- * If a project is already loaded, it is closed first; the same MCP server process can therefore hop between
- * APKs / DEXes / JARs without restarting. Holds the session's write lock for the duration of the load.
+ * If a project is already loaded, it is closed first; the same MCP server process can therefore hop
+ * between
+ * APKs / DEXes / JARs without restarting. Holds the session's write lock for the duration of the
+ * load.
  */
 public final class OpenFileTool extends AbstractTool {
 
@@ -38,7 +44,8 @@ public final class OpenFileTool extends AbstractTool {
 	@Override
 	public String description() {
 		return "Load a jadx-decodable input (.apk, .dex, .jar, .class, .smali, .zip, .aar, .arsc, .aab, .xapk, "
-				+ ".apkm) and make it the active project for every other tool. If a project is already open, "
+				+ ".apkm) or a saved `.jadx` project and make it the active project for every other tool. "
+				+ "A `.jadx` file restores its input files and user rename data. If a project is already open, "
 				+ "it is closed first and its caches are dropped, so this tool also serves as 'switch project'. "
 				+ "If env JADX_MCP_AUX_INPUTS is set, the listed jars (typically android.jar) are loaded "
 				+ "alongside the primary input as auxiliary inputs — they participate in symbol resolution and "
@@ -74,10 +81,35 @@ public final class OpenFileTool extends AbstractTool {
 		// `export JADX_MCP_AUX_INPUTS=...` in the parent shell, edit it, and have the next open_file
 		// pick up the new value without restarting the server.
 		List<File> auxInputs = JadxMcpArgs.resolveEnvAuxInputs();
+		JadxProjectIO.LoadedProject savedProject = null;
+		List<File> projectInputs = List.of(file);
+		if (file.getName().toLowerCase(Locale.ROOT).endsWith(".jadx")) {
+			try {
+				savedProject = JadxProjectIO.read(file.toPath());
+			} catch (IOException e) {
+				throw ToolException.invalidArg("path", "failed to read jadx project: " + e.getMessage());
+			}
+			projectInputs = new ArrayList<>(savedProject.inputFiles().size());
+			for (Path inputPath : savedProject.inputFiles()) {
+				File projectInput = inputPath.toFile();
+				if (!projectInput.exists()) {
+					throw ToolException.notFound("project input file", inputPath.toString());
+				}
+				if (!projectInput.isFile()) {
+					throw ToolException.invalidArg("path", "project input is not a regular file: " + inputPath);
+				}
+				projectInputs.add(projectInput);
+			}
+		}
 
 		File previous = session.getInputFile();
 		try {
-			session.load(file, auxInputs, skipResources, threadsCount);
+			if (savedProject == null) {
+				session.load(file, auxInputs, skipResources, threadsCount);
+			} else {
+				session.loadProject(file, projectInputs, savedProject.codeData(),
+						auxInputs, skipResources, threadsCount);
+			}
 		} catch (Throwable t) {
 			LOG.error("Failed to load {}", file, t);
 			Map<String, Object> details = new LinkedHashMap<>();
@@ -90,6 +122,14 @@ public final class OpenFileTool extends AbstractTool {
 		Map<String, Object> body = new LinkedHashMap<>();
 		body.put("loaded", true);
 		body.put("input_file", file.getAbsolutePath());
+		if (savedProject != null) {
+			List<String> inputPaths = new ArrayList<>(projectInputs.size());
+			for (File projectInput : projectInputs) {
+				inputPaths.add(projectInput.getAbsolutePath());
+			}
+			body.put("project_input_files", inputPaths);
+			body.put("rename_count", savedProject.codeData().getRenames().size());
+		}
 		if (previous != null && !previous.equals(file)) {
 			body.put("previous_input_file", previous.getAbsolutePath());
 		}

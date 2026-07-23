@@ -10,6 +10,7 @@ import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
 
 import jadx.mcp.tools.CloseFileTool;
+import jadx.mcp.tools.CurrentProjectTool;
 import jadx.mcp.tools.DecompileCodeTool;
 import jadx.mcp.tools.DecompileXmlTool;
 import jadx.mcp.tools.DisassembleTool;
@@ -19,7 +20,9 @@ import jadx.mcp.tools.ListClassesTool;
 import jadx.mcp.tools.ListResourcesTool;
 import jadx.mcp.tools.MethodOverridesTool;
 import jadx.mcp.tools.OpenFileTool;
+import jadx.mcp.tools.RenameTool;
 import jadx.mcp.tools.ResolveRefTool;
+import jadx.mcp.tools.SaveProjectTool;
 import jadx.mcp.tools.SearchCodeTool;
 import jadx.mcp.tools.SearchResourceTool;
 import jadx.mcp.tools.SearchStringsTool;
@@ -29,7 +32,8 @@ import jadx.mcp.tools.XrefsToTool;
 /**
  * MCP server entry point. Exposes a fixed set of jadx tools over stdio JSON-RPC.
  * <p>
- * Logging is sent to stderr (logback default) so it never interferes with the JSON-RPC channel on stdout.
+ * Logging is sent to stderr (logback default) so it never interferes with the JSON-RPC channel on
+ * stdout.
  */
 public final class JadxMcpServer {
 
@@ -62,7 +66,8 @@ public final class JadxMcpServer {
 		}, "jadx-mcp-shutdown"));
 
 		LOG.info("jadx-mcp ready");
-		// stdio transport keeps the process alive via its reactor; just block here so shutdown hook runs on EOF/SIGTERM.
+		// stdio transport keeps the process alive via its reactor; just block here so shutdown hook runs on
+		// EOF/SIGTERM.
 		try {
 			Thread.currentThread().join();
 		} catch (InterruptedException e) {
@@ -74,6 +79,8 @@ public final class JadxMcpServer {
 		// session lifecycle
 		server.addTool(new OpenFileTool(session).spec());
 		server.addTool(new CloseFileTool(session).spec());
+		server.addTool(new CurrentProjectTool(session).spec());
+		server.addTool(new SaveProjectTool(session).spec());
 		// reverse-engineering tools
 		server.addTool(new DecompileCodeTool(session).spec());
 		server.addTool(new DecompileXmlTool(session).spec());
@@ -85,6 +92,7 @@ public final class JadxMcpServer {
 		server.addTool(new XrefsToTool(session).spec());
 		server.addTool(new MethodOverridesTool(session).spec());
 		server.addTool(new ResolveRefTool(session).spec());
+		server.addTool(new RenameTool(session).spec());
 		// browse / navigate / analyze tools
 		server.addTool(new ListClassMembersTool(session).spec());
 		server.addTool(new ListClassesTool(session).spec());

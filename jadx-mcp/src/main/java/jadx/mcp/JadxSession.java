@@ -23,6 +23,8 @@ import jadx.api.JadxDecompiler;
 import jadx.api.JavaClass;
 import jadx.api.JavaNode;
 import jadx.api.args.UseSourceNameAsClassNameAlias;
+import jadx.api.data.ICodeRename;
+import jadx.api.data.impl.JadxCodeData;
 import jadx.api.impl.AnnotatedCodeWriter;
 import jadx.mcp.format.RefTableCache;
 import jadx.mcp.util.ToolException;
@@ -31,11 +33,14 @@ import jadx.plugins.tools.JadxExternalPluginsLoader;
 /**
  * Owns the singleton {@link JadxDecompiler} for the lifetime of the MCP server process.
  * <p>
- * Concurrency model: a {@link ReentrantReadWriteLock} guards the decompiler. Tool handlers acquire the read lock
- * (multiple tools may run concurrently against an already-loaded decompiler), while {@link #reload()} / {@link #close()}
+ * Concurrency model: a {@link ReentrantReadWriteLock} guards the decompiler. Tool handlers acquire
+ * the read lock
+ * (multiple tools may run concurrently against an already-loaded decompiler), while
+ * {@link #reload()} / {@link #close()}
  * acquire the write lock.
  * <p>
- * The session also owns shared caches that live as long as the decompiler (e.g. RefTable, FQN -> JavaClass).
+ * The session also owns shared caches that live as long as the decompiler (e.g. RefTable, FQN ->
+ * JavaClass).
  */
 public final class JadxSession implements Closeable {
 
@@ -43,29 +48,45 @@ public final class JadxSession implements Closeable {
 
 	private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
 	private final RefTableCache refTableCache = new RefTableCache();
-	// keyed by FQN (alias or raw); concurrent because populated lazily under the read lock by findClass()
+	// keyed by FQN (alias or raw); concurrent because populated lazily under the read lock by
+	// findClass()
 	private final ConcurrentMap<String, JavaClass> fqnIndex = new ConcurrentHashMap<>();
 	// FQNs (alias + raw) of classes that came from auxInputs; used by isAppClass() to hide them from
 	// "list-shaped" tool output. Built once at openDecompilerLocked() and read concurrently afterwards.
 	private final Set<String> auxClassFqns = ConcurrentHashMap.newKeySet();
 
 	private File inputFile;
+	private List<File> projectInputFiles = Collections.emptyList();
 	private List<File> auxInputs = Collections.emptyList();
 	private boolean skipResources;
 	private int threadsCount;
 	// Distinct aux class count, set once during openDecompilerLocked. Tracked independently of
 	// auxClassFqns.size() because the set merges alias + raw FQN entries when they're identical.
 	private int auxClassCount;
+	private JadxCodeData codeData = new JadxCodeData();
 
 	private JadxDecompiler decompiler;
 
 	public void load(File inputFile, List<File> auxInputs, boolean skipResources, int threadsCount) {
+		load(inputFile, List.of(inputFile), new JadxCodeData(), auxInputs, skipResources, threadsCount);
+	}
+
+	public void loadProject(File projectFile, List<File> projectInputFiles, JadxCodeData projectCodeData,
+			List<File> auxInputs, boolean skipResources, int threadsCount) {
+		load(projectFile, projectInputFiles, projectCodeData, auxInputs, skipResources, threadsCount);
+	}
+
+	private void load(File inputFile, List<File> projectInputFiles, JadxCodeData projectCodeData,
+			List<File> auxInputs, boolean skipResources, int threadsCount) {
 		lock.writeLock().lock();
 		try {
+			closeDecompilerLocked();
 			this.inputFile = inputFile;
+			this.projectInputFiles = List.copyOf(projectInputFiles);
 			this.auxInputs = auxInputs == null ? Collections.emptyList() : List.copyOf(auxInputs);
 			this.skipResources = skipResources;
 			this.threadsCount = threadsCount;
+			this.codeData = copyCodeData(projectCodeData);
 			openDecompilerLocked();
 		} finally {
 			lock.writeLock().unlock();
@@ -88,8 +109,10 @@ public final class JadxSession implements Closeable {
 	}
 
 	/**
-	 * Close the decompiler and return what was loaded just before the close — atomically, under the write lock.
-	 * This avoids a TOCTOU race where a caller reads {@link #isLoaded()} / {@link #getInputFile()} separately
+	 * Close the decompiler and return what was loaded just before the close — atomically, under the
+	 * write lock.
+	 * This avoids a TOCTOU race where a caller reads {@link #isLoaded()} / {@link #getInputFile()}
+	 * separately
 	 * from the close call and another writer slips in between.
 	 */
 	public CloseSnapshot closeAndSnapshot() {
@@ -98,12 +121,16 @@ public final class JadxSession implements Closeable {
 			boolean wasLoaded = decompiler != null;
 			File previous = inputFile;
 			closeDecompilerLocked();
-			// Forget the input metadata so getInputFile()/isLoaded() report the truthful "nothing loaded" state.
-			// reload() doesn't reach here because it calls closeDecompilerLocked() directly, preserving the metadata.
+			// Forget the input metadata so getInputFile()/isLoaded() report the truthful "nothing loaded"
+			// state.
+			// reload() doesn't reach here because it calls closeDecompilerLocked() directly, preserving the
+			// metadata.
 			inputFile = null;
+			projectInputFiles = Collections.emptyList();
 			auxInputs = Collections.emptyList();
 			skipResources = false;
 			threadsCount = 0;
+			codeData = new JadxCodeData();
 			return new CloseSnapshot(wasLoaded, previous);
 		} finally {
 			lock.writeLock().unlock();
@@ -129,7 +156,7 @@ public final class JadxSession implements Closeable {
 					inputFile, auxInputs.size(), auxInputs);
 		}
 		JadxArgs args = new JadxArgs();
-		args.getInputFiles().add(inputFile);
+		args.getInputFiles().addAll(projectInputFiles);
 		for (File aux : auxInputs) {
 			args.getInputFiles().add(aux);
 		}
@@ -139,6 +166,7 @@ public final class JadxSession implements Closeable {
 		}
 		args.setPluginLoader(new JadxExternalPluginsLoader());
 		args.setFilesGetter(JadxMcpFilesGetter.INSTANCE);
+		args.setCodeData(codeData);
 		// AnnotatedCodeWriter -> we need code metadata for RefTable / xref / resolve_ref
 		args.setCodeWriterProvider(AnnotatedCodeWriter::new);
 
@@ -160,10 +188,10 @@ public final class JadxSession implements Closeable {
 		// LLM about what symbols actually exist in the dex. Caller bypasses for a single class
 		// are not supported (would require unload+reload and trash the code cache) — pick the
 		// less-pretty-but-honest version once at session creation.
-		args.setMoveInnerClasses(false);          // keep $-style inner names; they round-trip with smali
-		args.setInlineMethods(false);             // do not splice short methods into their callers
-		args.setInlineAnonymousClasses(false);    // keep anonymous classes as their own ClassNode
-		args.setReplaceConsts(false);             // keep `R.id.foo` as field reads, not literal values
+		args.setMoveInnerClasses(false); // keep $-style inner names; they round-trip with smali
+		args.setInlineMethods(false); // do not splice short methods into their callers
+		args.setInlineAnonymousClasses(false); // keep anonymous classes as their own ClassNode
+		args.setReplaceConsts(false); // keep `R.id.foo` as field reads, not literal values
 
 		decompiler = new JadxDecompiler(args);
 		decompiler.load();
@@ -171,7 +199,8 @@ public final class JadxSession implements Closeable {
 		auxClassFqns.clear();
 		auxClassCount = 0;
 		refTableCache.invalidateAll();
-		// Lower-cased base names of aux files, used to tag classes whose ClassNode.inputFileName came from one of them.
+		// Lower-cased base names of aux files, used to tag classes whose ClassNode.inputFileName came from
+		// one of them.
 		// Substring match on lower case is the most resilient across jadx's input-file naming variants
 		// (DEX uses File.getName() literally, JAR/CLASS uses "jar.jar:entry.class" form, etc.).
 		Set<String> auxFileNames = auxInputs.stream()
@@ -283,13 +312,18 @@ public final class JadxSession implements Closeable {
 		return decompiler != null;
 	}
 
-	/** Class count currently loaded (top-level + inner classes); 0 when no project is loaded.
-	 *  Must be called while holding the read lock (via {@link #read}) when isLoaded() may change. */
+	/**
+	 * Class count currently loaded (top-level + inner classes); 0 when no project is loaded.
+	 * Must be called while holding the read lock (via {@link #read}) when isLoaded() may change.
+	 */
 	public int loadedClassCount() {
 		return decompiler == null ? 0 : decompiler.getClassesWithInners().size();
 	}
 
-	/** Aux-class count (subset of {@link #loadedClassCount()}); always 0 when no aux inputs were provided. */
+	/**
+	 * Aux-class count (subset of {@link #loadedClassCount()}); always 0 when no aux inputs were
+	 * provided.
+	 */
 	public int loadedAuxClassCount() {
 		return auxClassCount;
 	}
@@ -304,10 +338,117 @@ public final class JadxSession implements Closeable {
 	}
 
 	/**
-	 * True iff {@code jc} comes from the primary input (not from any aux input). Always true when no aux
+	 * Return an atomic snapshot of the current project state without requiring a project to be loaded.
+	 * Rename entries are copied so callers can safely serialize the snapshot after releasing the lock.
+	 */
+	public ProjectSnapshot projectSnapshot() {
+		lock.readLock().lock();
+		try {
+			return new ProjectSnapshot(
+					decompiler != null,
+					inputFile,
+					List.copyOf(projectInputFiles),
+					copyCodeData(codeData));
+		} finally {
+			lock.readLock().unlock();
+		}
+	}
+
+	public static final class ProjectSnapshot {
+		public final boolean loaded;
+		public final @Nullable File inputFile;
+		public final List<File> projectInputFiles;
+		public final JadxCodeData codeData;
+		public final List<ICodeRename> renames;
+
+		private ProjectSnapshot(boolean loaded, @Nullable File inputFile,
+				List<File> projectInputFiles, JadxCodeData codeData) {
+			this.loaded = loaded;
+			this.inputFile = inputFile;
+			this.projectInputFiles = projectInputFiles;
+			this.codeData = codeData;
+			this.renames = List.copyOf(codeData.getRenames());
+		}
+	}
+
+	/**
+	 * Resolve and persist one user rename while holding the write lock, then fully reopen the project
+	 * so every
+	 * symbol index and code cache observes the new aliases. If reopening fails, restore the previous
+	 * code data and
+	 * make a best-effort attempt to reopen the original project before propagating the failure.
+	 */
+	public <T> RenameApplyResult<T> applyRename(Function<JadxDecompiler, RenameMutation<T>> resolver) {
+		lock.writeLock().lock();
+		try {
+			ensureLoaded();
+			RenameMutation<T> mutation = resolver.apply(decompiler);
+			JadxCodeData previousCodeData = codeData;
+			JadxCodeData updatedCodeData = copyCodeData(previousCodeData);
+			List<ICodeRename> renames = new ArrayList<>(updatedCodeData.getRenames());
+			renames.remove(mutation.rename);
+			renames.add(mutation.rename);
+			Collections.sort(renames);
+			updatedCodeData.setRenames(renames);
+			codeData = updatedCodeData;
+
+			try {
+				closeDecompilerLocked();
+				openDecompilerLocked();
+			} catch (Throwable updateFailure) {
+				codeData = previousCodeData;
+				try {
+					closeDecompilerLocked();
+					openDecompilerLocked();
+				} catch (Throwable rollbackFailure) {
+					updateFailure.addSuppressed(rollbackFailure);
+				}
+				throw updateFailure;
+			}
+			return new RenameApplyResult<>(mutation.value, renames.size());
+		} finally {
+			lock.writeLock().unlock();
+		}
+	}
+
+	private static JadxCodeData copyCodeData(JadxCodeData source) {
+		JadxCodeData copy = new JadxCodeData();
+		copy.setComments(source.getComments() == null
+				? new ArrayList<>()
+				: new ArrayList<>(source.getComments()));
+		copy.setRenames(source.getRenames() == null
+				? new ArrayList<>()
+				: new ArrayList<>(source.getRenames()));
+		return copy;
+	}
+
+	public static final class RenameMutation<T> {
+		private final ICodeRename rename;
+		private final T value;
+
+		public RenameMutation(ICodeRename rename, T value) {
+			this.rename = rename;
+			this.value = value;
+		}
+	}
+
+	public static final class RenameApplyResult<T> {
+		public final T value;
+		public final int renameCount;
+
+		private RenameApplyResult(T value, int renameCount) {
+			this.value = value;
+			this.renameCount = renameCount;
+		}
+	}
+
+	/**
+	 * True iff {@code jc} comes from the primary input (not from any aux input). Always true when no
+	 * aux
 	 * inputs were configured. Use this to hide aux classes from list-shaped tool output (list_classes,
 	 * search_*, xrefs_to.uses, inheritance_tree.subclasses, ...). Tools that look up by explicit FQN
-	 * (decompile_code, class_members, xrefs_to subject) must NOT filter on this — the user asked for the
+	 * (decompile_code, class_members, xrefs_to subject) must NOT filter on this — the user asked for
+	 * the
 	 * aux symbol explicitly.
 	 */
 	public boolean isAppClass(JavaClass jc) {
