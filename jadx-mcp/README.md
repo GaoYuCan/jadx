@@ -72,6 +72,7 @@ jadx-mcp/build/libs/jadx-mcp-dev-all.jar
 | `close_file` | 关闭当前项目并释放缓存。重复调用也是安全的。 |
 | `current_project` | 返回当前是否已加载项目，以及主输入文件的绝对路径、文件名、扩展名、大小和最后修改时间。 |
 | `save_project` | 把主输入文件和 MCP 中产生的 rename 记录保存为 jadx GUI 可打开的 v2 `.jadx` 项目文件。 |
+| `run_script` | 使用脚本路径或内联脚本文本，在当前已加载项目上执行 `.jadx.kts`；立即运行顶层代码和 `afterLoad`，不注册反编译 pass。 |
 
 ### 浏览与导航
 

@@ -22,6 +22,7 @@ import jadx.mcp.tools.MethodOverridesTool;
 import jadx.mcp.tools.OpenFileTool;
 import jadx.mcp.tools.RenameTool;
 import jadx.mcp.tools.ResolveRefTool;
+import jadx.mcp.tools.RunScriptTool;
 import jadx.mcp.tools.SaveProjectTool;
 import jadx.mcp.tools.SearchCodeTool;
 import jadx.mcp.tools.SearchResourceTool;
@@ -81,6 +82,7 @@ public final class JadxMcpServer {
 		server.addTool(new CloseFileTool(session).spec());
 		server.addTool(new CurrentProjectTool(session).spec());
 		server.addTool(new SaveProjectTool(session).spec());
+		server.addTool(new RunScriptTool(session).spec());
 		// reverse-engineering tools
 		server.addTool(new DecompileCodeTool(session).spec());
 		server.addTool(new DecompileXmlTool(session).spec());

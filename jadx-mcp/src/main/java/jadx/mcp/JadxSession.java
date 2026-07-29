@@ -275,6 +275,22 @@ public final class JadxSession implements Closeable {
 	}
 
 	/**
+	 * Run an exclusive action against the loaded decompiler.
+	 * <p>
+	 * Used by operations that temporarily mutate jadx runtime state, such as dynamic script
+	 * evaluation. The action must restore temporary state before returning.
+	 */
+	public <T> T write(Function<JadxDecompiler, T> action) {
+		lock.writeLock().lock();
+		try {
+			ensureLoaded();
+			return action.apply(decompiler);
+		} finally {
+			lock.writeLock().unlock();
+		}
+	}
+
+	/**
 	 * Look up a {@link JavaClass} by its fully qualified name (alias or raw).
 	 * Must be called while holding the read lock (via {@link #read}).
 	 */
