@@ -39,8 +39,10 @@ dependencies {
 	implementation("ch.qos.logback:logback-classic:1.5.32")
 	implementation("com.google.code.gson:gson:2.13.2")
 
-	// Official MCP Java SDK (bundles core + Jackson3 + STDIO transport)
+	// Official MCP Java SDK (bundles core, Jackson3, stdio and Servlet transports)
 	implementation("io.modelcontextprotocol.sdk:mcp:1.0.0")
+	implementation("org.eclipse.jetty:jetty-server:12.1.11")
+	implementation("org.eclipse.jetty.ee11:jetty-ee11-servlet:12.1.11")
 
 	testImplementation(
 		project

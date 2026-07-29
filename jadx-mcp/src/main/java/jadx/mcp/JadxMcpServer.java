@@ -8,6 +8,7 @@ import io.modelcontextprotocol.server.McpServer;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
 import io.modelcontextprotocol.spec.McpSchema.ServerCapabilities;
+import io.modelcontextprotocol.spec.McpStreamableServerTransportProvider;
 
 import jadx.mcp.tools.CloseFileTool;
 import jadx.mcp.tools.CurrentProjectTool;
@@ -31,27 +32,36 @@ import jadx.mcp.tools.SearchSymbolTool;
 import jadx.mcp.tools.XrefsToTool;
 
 /**
- * MCP server entry point. Exposes a fixed set of jadx tools over stdio JSON-RPC.
+ * MCP server entry point. Exposes a fixed set of jadx tools over stdio or Streamable HTTP.
  * <p>
- * Logging is sent to stderr (logback default) so it never interferes with the JSON-RPC channel on
- * stdout.
+ * Logging is sent to stderr (logback default), so stdio mode keeps stdout reserved for JSON-RPC.
  */
 public final class JadxMcpServer {
 
 	private static final Logger LOG = LoggerFactory.getLogger(JadxMcpServer.class);
+	private static final String SERVER_NAME = "jadx-mcp";
+	private static final String SERVER_VERSION = "0.1.0";
 
 	public static void main(String[] argv) {
-		if (JadxMcpArgs.parse(argv) == null) {
+		JadxMcpArgs args = JadxMcpArgs.parse(argv);
+		if (args == null) {
 			System.exit(1);
 			return;
 		}
 
 		JadxSession session = new JadxSession();
 		LOG.info("No project loaded at startup; waiting for `open_file` from MCP client.");
+		if (args.getTransport() == JadxMcpArgs.Transport.STREAMABLE_HTTP) {
+			runStreamableHttp(args, session);
+		} else {
+			runStdio(session);
+		}
+	}
 
+	private static void runStdio(JadxSession session) {
 		StdioServerTransportProvider transport = new StdioServerTransportProvider(McpJsonDefaults.getMapper());
 		McpSyncServer server = McpServer.sync(transport)
-				.serverInfo("jadx-mcp", "0.1.0")
+				.serverInfo(SERVER_NAME, SERVER_VERSION)
 				.capabilities(ServerCapabilities.builder().tools(true).build())
 				.build();
 
@@ -74,6 +84,42 @@ public final class JadxMcpServer {
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 		}
+	}
+
+	private static void runStreamableHttp(JadxMcpArgs args, JadxSession session) {
+		JadxMcpHttpServer httpServer = new JadxMcpHttpServer(args, session);
+		Thread shutdownHook = new Thread(() -> {
+			LOG.info("Shutting down jadx-mcp");
+			httpServer.close();
+			session.close();
+		}, "jadx-mcp-shutdown");
+		Runtime.getRuntime().addShutdownHook(shutdownHook);
+
+		try (httpServer) {
+			httpServer.start();
+			LOG.info("jadx-mcp Streamable HTTP endpoint ready at {}", httpServer.getEndpointUri());
+			httpServer.await();
+		} catch (Exception e) {
+			LOG.error("Streamable HTTP server failed", e);
+			System.exit(1);
+		} finally {
+			session.close();
+			try {
+				Runtime.getRuntime().removeShutdownHook(shutdownHook);
+			} catch (IllegalStateException ignored) {
+				// JVM shutdown is already in progress.
+			}
+		}
+	}
+
+	static McpSyncServer createStreamableServer(
+			McpStreamableServerTransportProvider transport, JadxSession session) {
+		McpSyncServer server = McpServer.sync(transport)
+				.serverInfo(SERVER_NAME, SERVER_VERSION)
+				.capabilities(ServerCapabilities.builder().tools(true).build())
+				.build();
+		registerTools(server, session);
+		return server;
 	}
 
 	private static void registerTools(McpSyncServer server, JadxSession session) {

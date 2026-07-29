@@ -21,9 +21,9 @@
 jadx-mcp/build/libs/jadx-mcp-dev-all.jar
 ```
 
-## 接入 MCP 客户端
+## Stdio
 
-在 MCP 客户端配置中加入一个本地 server。下面以 Cursor 的 `~/.cursor/mcp.json` 为例。
+默认使用 stdio。在 MCP 客户端配置中加入一个本地 server。下面以 Cursor 的 `~/.cursor/mcp.json` 为例。
 
 ```json
 {
@@ -52,9 +52,62 @@ jadx-mcp/build/libs/jadx-mcp-dev-all.jar
 
 路径分隔符与 `$CLASSPATH` 一致：macOS / Linux 使用 `:`，Windows 使用 `;`。
 
+## Streamable HTTP
+
+使用以下命令启动 Streamable HTTP endpoint：
+
+```bash
+jadx-mcp/bin/jadx-mcp.sh \
+  --transport streamable-http \
+  --http-host 127.0.0.1 \
+  --http-port 8080 \
+  --http-path /mcp
+```
+
+客户端连接：
+
+```text
+http://127.0.0.1:8080/mcp
+```
+
+支持 URL 型 MCP 配置的客户端可直接填写：
+
+```json
+{
+  "mcpServers": {
+    "jadx": {
+      "url": "http://127.0.0.1:8080/mcp"
+    }
+  }
+}
+```
+
+HTTP 参数：
+
+| 参数 | 默认值 | 用途 |
+| --- | --- | --- |
+| `--transport` | `stdio` | 设为 `streamable-http` 启用 HTTP。 |
+| `--http-host` | `127.0.0.1` | HTTP 监听地址。 |
+| `--http-port` | `8080` | HTTP 监听端口；`0` 表示使用临时端口。 |
+| `--http-path` | `/mcp` | MCP endpoint 路径。 |
+| `--http-allowed-host` | 当前监听地址 | 额外允许的 `Host`，可重复传入。 |
+| `--http-allowed-origin` | 当前监听地址 | 额外允许的 `Origin`，可重复传入。 |
+
+默认只监听本机并校验 `Host`/`Origin`。监听所有网卡时必须显式提供允许的 Host，例如：
+
+```bash
+jadx-mcp/bin/jadx-mcp.sh \
+  --transport streamable-http \
+  --http-host 0.0.0.0 \
+  --http-allowed-host 'mcp.example.com:*' \
+  --http-allowed-origin 'https://client.example.com'
+```
+
+服务本身不提供 TLS 或身份认证；需要跨主机访问时应放在带认证的反向代理后。所有 HTTP client session 共享同一个当前 JADX 项目，任一客户端调用 `open_file` 或 `close_file` 都会改变该共享项目。
+
 ## 超长结果
 
-`jadx-mcp` 通过 stdio 暴露 MCP 工具。为了避免大类源码、大 XML 或大搜索结果撑爆 MCP 客户端上下文，工具结果序列化后超过 50000 字符时，不会把完整 JSON 直接返回；服务器会把完整结果写入本机临时目录，并在 tool call 返回中给出：
+`jadx-mcp` 通过 stdio 或 Streamable HTTP 暴露 MCP 工具。为了避免大类源码、大 XML 或大搜索结果撑爆 MCP 客户端上下文，工具结果序列化后超过 50000 字符时，不会把完整 JSON 直接返回；服务器会把完整结果写入本机临时目录，并在 tool call 返回中给出：
 
 - `output_truncated=true`
 - `output_file=/path/to/jadx-mcp-*.json`
