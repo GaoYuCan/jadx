@@ -135,7 +135,9 @@ public final class ListClassesTool extends AbstractTool {
 		if (d == null) {
 			d = depthRelativeTo(rawPkg, pkgPrefix);
 		}
-		if (d == null) return false;
+		if (d == null) {
+			return false;
+		}
 		return maxDepth == 0 || d < maxDepth;
 	}
 
@@ -146,19 +148,29 @@ public final class ListClassesTool extends AbstractTool {
 	private static Integer depthRelativeTo(String pkg, String prefix) {
 		if (prefix == null || prefix.isEmpty()) {
 			// "top level" — count dots: "" → 0, "com" → 1, "com.foo" → 2…
-			if (pkg.isEmpty()) return 0;
+			if (pkg.isEmpty()) {
+				return 0;
+			}
 			int dots = 0;
 			for (int i = 0; i < pkg.length(); i++) {
-				if (pkg.charAt(i) == '.') dots++;
+				if (pkg.charAt(i) == '.') {
+					dots++;
+				}
 			}
 			return dots + 1;
 		}
-		if (pkg.equals(prefix)) return 0;
-		if (!pkg.startsWith(prefix + ".")) return null;
+		if (pkg.equals(prefix)) {
+			return 0;
+		}
+		if (!pkg.startsWith(prefix + ".")) {
+			return null;
+		}
 		String tail = pkg.substring(prefix.length() + 1);
 		int dots = 0;
 		for (int i = 0; i < tail.length(); i++) {
-			if (tail.charAt(i) == '.') dots++;
+			if (tail.charAt(i) == '.') {
+				dots++;
+			}
 		}
 		return dots + 1;
 	}

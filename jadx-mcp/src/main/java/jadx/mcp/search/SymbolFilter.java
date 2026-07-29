@@ -161,9 +161,13 @@ public final class SymbolFilter {
 		}
 		for (String token : tokens) {
 			String t = token.trim();
-			if (t.isEmpty()) continue;
+			if (t.isEmpty()) {
+				continue;
+			}
 			boolean negated = t.startsWith("!");
-			if (negated) t = t.substring(1).trim();
+			if (negated) {
+				t = t.substring(1).trim();
+			}
 			int mask = accessFlagMask(t);
 			if (mask == 0) {
 				throw ToolException.invalidArg("filter.access", "unknown flag token: '" + token + "'");
@@ -181,8 +185,12 @@ public final class SymbolFilter {
 
 	/** Cheap first-pass filter: every kind needs the class to live under the requested package. */
 	public boolean matchesPackagePrefix(JavaClass cls) {
-		if (packagePrefix == null) return true;
-		if (cls.getFullName().startsWith(packagePrefix)) return true;
+		if (packagePrefix == null) {
+			return true;
+		}
+		if (cls.getFullName().startsWith(packagePrefix)) {
+			return true;
+		}
 		return includeRawNames && cls.getRawName().startsWith(packagePrefix);
 	}
 
@@ -191,24 +199,38 @@ public final class SymbolFilter {
 			@Nullable Set<String> superSubtypes, @Nullable Set<String> interfaceImpls) {
 		ClassNode cn = cls.getClassNode();
 		AccessInfo acc = cn.getAccessFlags();
-		if (!matchesAccessMask(acc.rawValue())) return false;
-		if (classKind != null && !SymbolFormat.classKind(acc).equals(classKind)) return false;
-		if (superclass != null && !classExtends(cn, superclass, superclassTransitive, superSubtypes)) return false;
-		if (iface != null && !classImplements(cn, iface, interfaceTransitive, interfaceImpls)) return false;
+		if (!matchesAccessMask(acc.rawValue())) {
+			return false;
+		}
+		if (classKind != null && !SymbolFormat.classKind(acc).equals(classKind)) {
+			return false;
+		}
+		if (superclass != null && !classExtends(cn, superclass, superclassTransitive, superSubtypes)) {
+			return false;
+		}
+		if (iface != null && !classImplements(cn, iface, interfaceTransitive, interfaceImpls)) {
+			return false;
+		}
 		return matchesAnnotation(cn);
 	}
 
 	/** Member-level access bit-test. */
 	public boolean matchesAccessMask(int rawAcc) {
-		if ((rawAcc & requiredAccessMask) != requiredAccessMask) return false;
+		if ((rawAcc & requiredAccessMask) != requiredAccessMask) {
+			return false;
+		}
 		return (rawAcc & forbiddenAccessMask) == 0;
 	}
 
 	/** Annotation presence on any {@link IAttributeNode} (class / method / field). */
 	public boolean matchesAnnotation(IAttributeNode node) {
-		if (annotation == null) return true;
+		if (annotation == null) {
+			return true;
+		}
 		AnnotationsAttr aList = node.get(JadxAttrType.ANNOTATION_LIST);
-		if (aList == null) return false;
+		if (aList == null) {
+			return false;
+		}
 		return aList.get(annotation) != null;
 	}
 
@@ -227,7 +249,9 @@ public final class SymbolFilter {
 			return transitiveImpls.contains(cn.getClassInfo().getType().getObject());
 		}
 		for (ArgType iface : cn.getInterfaces()) {
-			if (iface.isObject() && iface.getObject().equals(wantedDot)) return true;
+			if (iface.isObject() && iface.getObject().equals(wantedDot)) {
+				return true;
+			}
 		}
 		return false;
 	}
@@ -236,16 +260,26 @@ public final class SymbolFilter {
 
 	private static @Nullable String strOrNull(Map<String, Object> map, String key) {
 		Object v = map.get(key);
-		if (v == null) return null;
-		if (v instanceof String s) return s.isEmpty() ? null : s;
+		if (v == null) {
+			return null;
+		}
+		if (v instanceof String s) {
+			return s.isEmpty() ? null : s;
+		}
 		throw ToolException.invalidArg("filter." + key, "must be a string");
 	}
 
 	private static boolean boolOrFalse(Map<String, Object> map, String key) {
 		Object v = map.get(key);
-		if (v == null) return false;
-		if (v instanceof Boolean b) return b;
-		if (v instanceof String s) return Boolean.parseBoolean(s);
+		if (v == null) {
+			return false;
+		}
+		if (v instanceof Boolean b) {
+			return b;
+		}
+		if (v instanceof String s) {
+			return Boolean.parseBoolean(s);
+		}
 		throw ToolException.invalidArg("filter." + key, "must be a boolean");
 	}
 
@@ -271,8 +305,12 @@ public final class SymbolFilter {
 	}
 
 	private static boolean isInternalAnnotationFqn(String s) {
-		if (s.length() < 3) return false;
-		if (s.charAt(0) != 'L' || s.charAt(s.length() - 1) != ';') return false;
+		if (s.length() < 3) {
+			return false;
+		}
+		if (s.charAt(0) != 'L' || s.charAt(s.length() - 1) != ';') {
+			return false;
+		}
 		// dot-form FQN would mean LLM forgot the slashes; reject so users see a clear error.
 		return s.indexOf('.') < 0;
 	}

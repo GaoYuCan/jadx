@@ -80,7 +80,7 @@ public final class SearchResourceTool extends AbstractTool {
 			List<Map<String, Object>> hits = new ArrayList<>();
 			int seen = 0;
 			boolean hasMore = false;
-			outer:
+			boolean limitReached = false;
 			for (ResourceFile rf : decompiler.getResources()) {
 				if (rf.getType().getContentType() != ResourceContentType.CONTENT_TEXT) {
 					continue;
@@ -143,10 +143,14 @@ public final class SearchResourceTool extends AbstractTool {
 						if (hits.size() >= maxResults) {
 							int next = engine.find(code, lineEnd);
 							hasMore = next >= 0;
-							break outer;
+							limitReached = true;
+							break;
 						}
 					}
 					pos = Math.max(found + 1, CodeUtils.getLineEndForPos(code, found) + 1);
+				}
+				if (limitReached) {
+					break;
 				}
 			}
 			Map<String, Object> result = new LinkedHashMap<>();

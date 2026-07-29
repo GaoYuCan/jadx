@@ -115,8 +115,8 @@ public final class SearchCodeTool extends AbstractTool {
 			String nextClassFqn = null;
 			boolean cursorReached = startClassFqn == null;
 			int classesScanned = 0;
+			boolean limitReached = false;
 
-			outer:
 			for (JavaClass cls : session.appClassesNoInner()) {
 				if (!cursorReached) {
 					if (cls.getFullName().equals(startClassFqn)) {
@@ -190,10 +190,14 @@ public final class SearchCodeTool extends AbstractTool {
 								// Page boundary still inside this class: caller resumes via offset, not a class cursor.
 								nextClassFqn = cls.getFullName();
 							}
-							break outer;
+							limitReached = true;
+							break;
 						}
 					}
 					pos = Math.max(found + 1, CodeUtils.getLineEndForPos(code, found) + 1);
+				}
+				if (limitReached) {
+					break;
 				}
 			}
 			Map<String, Object> result = new LinkedHashMap<>();

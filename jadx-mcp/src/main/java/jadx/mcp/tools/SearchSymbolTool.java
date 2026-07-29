@@ -165,23 +165,30 @@ public final class SearchSymbolTool extends AbstractTool {
 			List<Map<String, Object>> hits = new ArrayList<>();
 			Pager pager = new Pager(skip, maxResults);
 
-			outer:
 			for (JavaClass cls : scope) {
-				if (!filter.matchesPackagePrefix(cls)) continue;
+				if (!filter.matchesPackagePrefix(cls)) {
+					continue;
+				}
+				boolean limitReached = false;
 				switch (kind) {
 					case "class":
-						if (!filter.matchesClassFilter(cls, superSubtypes, interfaceImpls)) continue outer;
-						if (engine != null && !matchesClassName(engine, cls, matchFull, filter.includeRawNames)) {
-							continue outer;
+						if (!filter.matchesClassFilter(cls, superSubtypes, interfaceImpls)) {
+							continue;
 						}
-						if (pager.shouldEmit(hits, SymbolFormat.classHit(cls))) break outer;
+						if (engine != null && !matchesClassName(engine, cls, matchFull, filter.includeRawNames)) {
+							continue;
+						}
+						limitReached = pager.shouldEmit(hits, SymbolFormat.classHit(cls));
 						break;
 					case "method":
-						if (collectMethods(cls, filter, engine, matchFull, hits, pager)) break outer;
+						limitReached = collectMethods(cls, filter, engine, matchFull, hits, pager);
 						break;
 					case "field":
-						if (collectFields(cls, filter, engine, matchFull, hits, pager)) break outer;
+						limitReached = collectFields(cls, filter, engine, matchFull, hits, pager);
 						break;
+				}
+				if (limitReached) {
+					break;
 				}
 			}
 
@@ -219,7 +226,9 @@ public final class SearchSymbolTool extends AbstractTool {
 	private static @org.jetbrains.annotations.Nullable Set<String> transitiveTypeSet(
 			jadx.api.JadxDecompiler decompiler, String kind, @org.jetbrains.annotations.Nullable String typeName,
 			boolean transitive) {
-		if (!"class".equals(kind) || typeName == null || !transitive) return null;
+		if (!"class".equals(kind) || typeName == null || !transitive) {
+			return null;
+		}
 		return new HashSet<>(decompiler.getRoot().getClsp().getImplementations(typeName));
 	}
 
@@ -229,12 +238,22 @@ public final class SearchSymbolTool extends AbstractTool {
 			List<Map<String, Object>> hits, Pager pager) {
 		ClassNode cn = cls.getClassNode();
 		List<MethodNode> methods = cn.getMethods();
-		if (methods == null) return false;
+		if (methods == null) {
+			return false;
+		}
 		for (MethodNode mth : methods) {
-			if (!filter.matchesAccessMask(mth.getAccessFlags().rawValue())) continue;
-			if (!filter.matchesAnnotation(mth)) continue;
-			if (engine != null && !matchesMethodName(engine, mth, matchFull, filter.includeRawNames)) continue;
-			if (pager.shouldEmit(hits, SymbolFormat.methodHit(cls, mth))) return true;
+			if (!filter.matchesAccessMask(mth.getAccessFlags().rawValue())) {
+				continue;
+			}
+			if (!filter.matchesAnnotation(mth)) {
+				continue;
+			}
+			if (engine != null && !matchesMethodName(engine, mth, matchFull, filter.includeRawNames)) {
+				continue;
+			}
+			if (pager.shouldEmit(hits, SymbolFormat.methodHit(cls, mth))) {
+				return true;
+			}
 		}
 		return false;
 	}
@@ -245,12 +264,22 @@ public final class SearchSymbolTool extends AbstractTool {
 			List<Map<String, Object>> hits, Pager pager) {
 		ClassNode cn = cls.getClassNode();
 		List<FieldNode> fields = cn.getFields();
-		if (fields == null) return false;
+		if (fields == null) {
+			return false;
+		}
 		for (FieldNode fld : fields) {
-			if (!filter.matchesAccessMask(fld.getAccessFlags().rawValue())) continue;
-			if (!filter.matchesAnnotation(fld)) continue;
-			if (engine != null && !matchesFieldName(engine, cls, fld, matchFull, filter.includeRawNames)) continue;
-			if (pager.shouldEmit(hits, SymbolFormat.fieldHit(cls, fld))) return true;
+			if (!filter.matchesAccessMask(fld.getAccessFlags().rawValue())) {
+				continue;
+			}
+			if (!filter.matchesAnnotation(fld)) {
+				continue;
+			}
+			if (engine != null && !matchesFieldName(engine, cls, fld, matchFull, filter.includeRawNames)) {
+				continue;
+			}
+			if (pager.shouldEmit(hits, SymbolFormat.fieldHit(cls, fld))) {
+				return true;
+			}
 		}
 		return false;
 	}
@@ -258,7 +287,9 @@ public final class SearchSymbolTool extends AbstractTool {
 	// ---------- name matchers ----------
 
 	private static boolean matchesClassName(SearchEngine eng, JavaClass cls, boolean matchFull, boolean includeRaw) {
-		if (eng.find(matchFull ? cls.getFullName() : cls.getName(), 0) >= 0) return true;
+		if (eng.find(matchFull ? cls.getFullName() : cls.getName(), 0) >= 0) {
+			return true;
+		}
 		if (includeRaw) {
 			String raw = cls.getRawName();
 			String rawSimple = simpleName(raw);
@@ -269,7 +300,9 @@ public final class SearchSymbolTool extends AbstractTool {
 
 	private static boolean matchesMethodName(SearchEngine eng, MethodNode mth, boolean matchFull, boolean includeRaw) {
 		MethodInfo info = mth.getMethodInfo();
-		if (eng.find(matchFull ? info.getAliasFullName() : info.getAlias(), 0) >= 0) return true;
+		if (eng.find(matchFull ? info.getAliasFullName() : info.getAlias(), 0) >= 0) {
+			return true;
+		}
 		if (includeRaw) {
 			return eng.find(matchFull ? info.getFullName() : info.getName(), 0) >= 0;
 		}
@@ -279,7 +312,9 @@ public final class SearchSymbolTool extends AbstractTool {
 	private static boolean matchesFieldName(SearchEngine eng, JavaClass cls, FieldNode fld,
 			boolean matchFull, boolean includeRaw) {
 		String alias = fld.getAlias();
-		if (eng.find(matchFull ? cls.getFullName() + "." + alias : alias, 0) >= 0) return true;
+		if (eng.find(matchFull ? cls.getFullName() + "." + alias : alias, 0) >= 0) {
+			return true;
+		}
 		if (includeRaw) {
 			String name = fld.getName();
 			return eng.find(matchFull ? cls.getRawName() + "." + name : name, 0) >= 0;
@@ -310,7 +345,9 @@ public final class SearchSymbolTool extends AbstractTool {
 		/** Adds {@code hit} when past the {@code skip} cursor; returns true after {@code maxResults}. */
 		boolean shouldEmit(List<Map<String, Object>> hits, Map<String, Object> hit) {
 			seen++;
-			if (seen <= skip) return false;
+			if (seen <= skip) {
+				return false;
+			}
 			hits.add(hit);
 			if (hits.size() >= maxResults) {
 				hitLimit = true;

@@ -90,12 +90,18 @@ public final class FieldOpScanner {
 				} catch (Throwable t) {
 					return;
 				}
-				if (ref == null) return;
+				if (ref == null) {
+					return;
+				}
 				// IFieldRef.getParentClassType() returns the dex internal form ("Lcom/foo/Bar;"),
 				// but JavaField.getDeclaringClass().getRawName() returns dot form. Normalise once.
 				String parentDot = unwrapDexType(ref.getParentClassType());
-				if (parentDot == null || !parentDot.equals(fieldOwnerRaw)) return;
-				if (!fieldRawName.equals(ref.getName())) return;
+				if (parentDot == null || !parentDot.equals(fieldOwnerRaw)) {
+					return;
+				}
+				if (!fieldRawName.equals(ref.getName())) {
+					return;
+				}
 
 				boolean isWrite = (op == Opcode.IPUT || op == Opcode.SPUT);
 				String opName;
@@ -138,16 +144,28 @@ public final class FieldOpScanner {
 	 * everything else collapses to "mixed".
 	 */
 	private static String dominantOp(int[] rwi) {
-		int reads = rwi[0], writes = rwi[1], inits = rwi[2];
-		if (inits > 0 && writes == 0 && reads == 0) return "init";
-		if (writes > 0 && reads == 0 && inits == 0) return "write";
-		if (reads > 0 && writes == 0 && inits == 0) return "read";
+		int reads = rwi[0];
+		int writes = rwi[1];
+		int inits = rwi[2];
+		if (inits > 0 && writes == 0 && reads == 0) {
+			return "init";
+		}
+		if (writes > 0 && reads == 0 && inits == 0) {
+			return "write";
+		}
+		if (reads > 0 && writes == 0 && inits == 0) {
+			return "read";
+		}
 		return "mixed";
 	}
 
 	private static String unwrapDexType(String t) {
-		if (t == null || t.length() < 3) return null;
-		if (t.charAt(0) != 'L' || t.charAt(t.length() - 1) != ';') return t;
+		if (t == null || t.length() < 3) {
+			return null;
+		}
+		if (t.charAt(0) != 'L' || t.charAt(t.length() - 1) != ';') {
+			return t;
+		}
 		return t.substring(1, t.length() - 1).replace('/', '.');
 	}
 }

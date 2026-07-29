@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
@@ -118,11 +119,13 @@ public final class InheritanceTreeTool extends AbstractTool {
 
 			if (wantUp && cn != null) {
 				List<Map<String, Object>> superChain = new ArrayList<>();
-				LinkedHashSet<String> directIfs = new LinkedHashSet<>();
-				LinkedHashSet<String> inheritedIfs = new LinkedHashSet<>();
+				Set<String> directIfs = new LinkedHashSet<>();
+				Set<String> inheritedIfs = new LinkedHashSet<>();
 
 				for (ArgType i : cn.getInterfaces()) {
-					if (i.isObject()) directIfs.add(i.getObject());
+					if (i.isObject()) {
+						directIfs.add(i.getObject());
+					}
 				}
 
 				ArgType sup = cn.getSuperClass();
@@ -137,7 +140,9 @@ public final class InheritanceTreeTool extends AbstractTool {
 					if (parentCls != null) {
 						ClassNode parentCn = parentCls.getClassNode();
 						for (ArgType i : parentCn.getInterfaces()) {
-							if (i.isObject()) inheritedIfs.add(i.getObject());
+							if (i.isObject()) {
+								inheritedIfs.add(i.getObject());
+							}
 						}
 						sup = parentCn.getSuperClass();
 					} else {
