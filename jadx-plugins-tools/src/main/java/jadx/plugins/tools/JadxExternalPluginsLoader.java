@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.slf4j.Logger;
@@ -28,6 +29,16 @@ public class JadxExternalPluginsLoader implements JadxPluginLoader {
 	public static final String JADX_PLUGIN_CLASSLOADER_PREFIX = "jadx-plugin:";
 
 	private final List<URLClassLoader> classLoaders = new ArrayList<>();
+
+	private final Predicate<Class<?>> pluginClassFilter;
+
+	public JadxExternalPluginsLoader() {
+		this(c -> true);
+	}
+
+	public JadxExternalPluginsLoader(Predicate<Class<?>> pluginClassFilter) {
+		this.pluginClassFilter = pluginClassFilter;
+	}
 
 	@Override
 	public List<JadxPlugin> load() {
@@ -50,14 +61,15 @@ public class JadxExternalPluginsLoader implements JadxPluginLoader {
 		Map<String, JadxPlugin> map = new HashMap<>();
 		loadFromPath(map, pluginPath);
 		int loaded = map.size();
-		if (loaded == 0) {
-			throw new JadxRuntimeException("No plugin found in jar: " + pluginPath);
-		}
 		if (loaded > 1) {
 			String plugins = map.values().stream().map(p -> p.getPluginInfo().getPluginId()).collect(Collectors.joining(", "));
 			throw new JadxRuntimeException("Expect only one plugin per jar: " + pluginPath + ", but found: " + loaded + " - " + plugins);
 		}
-		return Utils.first(map.values());
+		JadxPlugin plugin = Utils.first(map.values());
+		if (plugin == null) {
+			throw new JadxRuntimeException("No plugin found in jar: " + pluginPath);
+		}
+		return plugin;
 
 	}
 
@@ -67,7 +79,8 @@ public class JadxExternalPluginsLoader implements JadxPluginLoader {
 			Class<? extends JadxPlugin> pluginClass = provider.type();
 			String clsName = pluginClass.getName();
 			if (!map.containsKey(clsName)
-					&& pluginClass.getClassLoader() == classLoader) {
+					&& pluginClass.getClassLoader() == classLoader
+					&& pluginClassFilter.test(pluginClass)) {
 				map.put(clsName, provider.get());
 			}
 		}

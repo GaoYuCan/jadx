@@ -244,9 +244,9 @@ public class ResTableBinaryParser extends CommonBinaryParser implements IResTabl
 	/**
 	 * Parse an <code>ResTable_type</code> (except for the 2 bytes <code>uint16_t</code>
 	 * from <code>ResChunk_header</code>).
-	 *
-	 * @see <a href=
-	 *      "https://github.com/aosp-mirror/platform_frameworks_base/blob/master/libs/androidfw/include/androidfw/ResourceTypes.h"></a>ResourceTypes.h</a>
+	 * <p>
+	 * See: <a href=
+	 * "https://github.com/aosp-mirror/platform_frameworks_base/blob/master/libs/androidfw/include/androidfw/ResourceTypes.h">ResourceTypes.h</a>
 	 */
 	private void parseTypeChunk(long start, PackageChunk pkg) throws IOException {
 		/* int headerSize = */

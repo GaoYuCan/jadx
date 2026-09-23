@@ -49,23 +49,31 @@ public class JadxPluginManager {
 	}
 
 	public void load(JadxPluginLoader pluginLoader) {
-		allPlugins.clear();
+		List<JadxPlugin> plugins = pluginLoader.load();
+
+		// allow repeated load (used in passes reload) but keep plugins added by 'register' method
+		Set<String> loadedIds = plugins.stream()
+				.map(p -> p.getPluginInfo().getPluginId())
+				.collect(Collectors.toSet());
+		allPlugins.removeIf(context -> loadedIds.contains(context.getPluginId()));
+
 		VerifyRequiredVersion verifyRequiredVersion = new VerifyRequiredVersion();
-		for (JadxPlugin plugin : pluginLoader.load()) {
+		for (JadxPlugin plugin : plugins) {
 			addPlugin(plugin, verifyRequiredVersion);
 		}
 		resolve();
 	}
 
-	public void register(JadxPlugin plugin) {
+	public @Nullable PluginContext register(JadxPlugin plugin) {
 		Objects.requireNonNull(plugin);
 		PluginContext addedPlugin = addPlugin(plugin, new VerifyRequiredVersion());
 		if (addedPlugin == null) {
-			LOG.debug("Can't register plugin, it was disabled: {}", plugin.getPluginInfo().getPluginId());
-			return;
+			LOG.debug("Plugin not registered: {}", plugin.getPluginInfo().getPluginId());
+			return null;
 		}
 		LOG.debug("Register plugin: {}", addedPlugin.getPluginId());
 		resolve();
+		return addedPlugin;
 	}
 
 	private @Nullable PluginContext addPlugin(JadxPlugin plugin, VerifyRequiredVersion verifyRequiredVersion) {

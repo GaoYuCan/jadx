@@ -6,8 +6,8 @@ dependencies {
 	api(project(":jadx-core"))
 
 	implementation(project(":jadx-plugins:jadx-dex-input"))
-	implementation("com.jakewharton.android.repackaged:dalvik-dx:16.0.1")
-	implementation("com.android.tools:r8:9.1.31")
+	implementation(libs.dx)
+	implementation(libs.r8)
 
-	implementation("org.ow2.asm:asm:9.10.1")
+	implementation(libs.asm)
 }

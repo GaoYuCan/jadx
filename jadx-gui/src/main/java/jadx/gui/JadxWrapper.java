@@ -31,19 +31,17 @@ import jadx.cli.plugins.JadxFilesGetter;
 import jadx.core.dex.nodes.ClassNode;
 import jadx.core.dex.nodes.ProcessState;
 import jadx.core.dex.nodes.RootNode;
-import jadx.core.plugins.AppContext;
 import jadx.core.utils.exceptions.JadxRuntimeException;
 import jadx.gui.cache.code.CodeCacheMode;
 import jadx.gui.cache.code.CodeStringCache;
 import jadx.gui.cache.code.disk.BufferCodeCache;
 import jadx.gui.cache.code.disk.DiskCodeCache;
 import jadx.gui.cache.usage.UsageInfoCache;
-import jadx.gui.plugins.context.CommonGuiPluginsContext;
+import jadx.gui.plugins.GuiPluginsManager;
 import jadx.gui.settings.JadxProject;
 import jadx.gui.settings.JadxSettings;
 import jadx.gui.ui.MainWindow;
 import jadx.gui.utils.CacheObject;
-import jadx.plugins.tools.JadxExternalPluginsLoader;
 
 import static jadx.core.dex.nodes.ProcessState.GENERATED_AND_UNLOADED;
 import static jadx.core.dex.nodes.ProcessState.NOT_LOADED;
@@ -57,7 +55,6 @@ public class JadxWrapper {
 
 	private final MainWindow mainWindow;
 	private volatile @Nullable JadxDecompiler decompiler;
-	private CommonGuiPluginsContext guiPluginsContext;
 
 	public JadxWrapper(MainWindow mainWindow) {
 		this.mainWindow = mainWindow;
@@ -68,14 +65,16 @@ public class JadxWrapper {
 		try {
 			synchronized (DECOMPILER_UPDATE_SYNC) {
 				JadxProject project = getProject();
+				GuiPluginsManager guiPluginsManager = mainWindow.getGuiPluginsManager();
 				JadxArgs jadxArgs = getSettings().toJadxArgs();
-				jadxArgs.setPluginLoader(new JadxExternalPluginsLoader());
+				jadxArgs.setPluginLoader(guiPluginsManager.buildProjectPluginLoader());
 				jadxArgs.setFilesGetter(JadxFilesGetter.INSTANCE);
 				project.fillJadxArgs(jadxArgs);
 				JadxAppCommon.applyEnvVars(jadxArgs);
 
 				decompiler = new JadxDecompiler(jadxArgs);
-				guiPluginsContext = initGuiPluginsContext(decompiler, mainWindow);
+				guiPluginsManager.initGuiPluginsContext(decompiler, false);
+				guiPluginsManager.injectGlobalPlugins(decompiler);
 				initUsageCache(jadxArgs);
 				registerCodeCache(decompiler);
 				decompiler.setEventsImpl(mainWindow.events());
@@ -105,10 +104,7 @@ public class JadxWrapper {
 					decompiler.close();
 					decompiler = null;
 				}
-				if (guiPluginsContext != null) {
-					resetGuiPluginsContext();
-					guiPluginsContext = null;
-				}
+				mainWindow.getGuiPluginsManager().resetProjectScope();
 			}
 		} catch (Exception e) {
 			LOG.error("Jadx decompiler close error", e);
@@ -167,27 +163,8 @@ public class JadxWrapper {
 		}
 	}
 
-	public static CommonGuiPluginsContext initGuiPluginsContext(JadxDecompiler decompiler, MainWindow mainWindow) {
-		CommonGuiPluginsContext guiPluginsContext = new CommonGuiPluginsContext(mainWindow);
-		decompiler.getPluginManager().registerAddPluginListener(pluginContext -> {
-			AppContext appContext = new AppContext();
-			appContext.setGuiContext(guiPluginsContext.buildForPlugin(pluginContext));
-			appContext.setFilesGetter(decompiler.getArgs().getFilesGetter());
-			pluginContext.setAppContext(appContext);
-		});
-		return guiPluginsContext;
-	}
-
-	public CommonGuiPluginsContext getGuiPluginsContext() {
-		return guiPluginsContext;
-	}
-
-	public void resetGuiPluginsContext() {
-		guiPluginsContext.reset();
-	}
-
 	public void reloadPasses() {
-		resetGuiPluginsContext();
+		mainWindow.getGuiPluginsManager().resetProjectScope();
 		decompiler.reloadPasses();
 	}
 

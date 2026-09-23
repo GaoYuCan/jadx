@@ -1,14 +1,12 @@
 import com.diffplug.gradle.spotless.FormatExtension
 import com.diffplug.gradle.spotless.SpotlessExtension
 import com.diffplug.spotless.LineEnding
-import com.github.benmanes.gradle.versions.updates.DependencyUpdatesTask
+import nl.littlerobots.vcu.plugin.resolver.VersionSelectors
 import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
-import java.util.Locale
 
 plugins {
-	id("com.github.ben-manes.versions") version "0.54.0"
-	id("se.patrikerdes.use-latest-versions") version "0.2.19"
-	id("com.diffplug.spotless") version "8.8.0"
+	id("nl.littlerobots.version-catalog-update") version "1.1.1"
+	id("com.diffplug.spotless") version "8.9.0"
 }
 
 val jadxEnv = loadEnv(file("$rootDir/.env"))
@@ -31,35 +29,10 @@ fun getBuildJavaVersion(): Int? {
 	return buildJavaVer
 }
 
-// control ErrorProne checks level, can be: off, warn, error
-val jadxBuildChecksMode = getBuildChecksMode()
-extra.set("jadxBuildChecksMode", jadxBuildChecksMode)
-
-fun getBuildChecksMode(): String {
-	val buildChecksMode = jadxEnv["JADX_BUILD_CHECKS_MODE"]?.lowercase() ?: "off"
-	val expectedValues = listOf("off", "warn", "error")
-	if (!expectedValues.contains(buildChecksMode)) {
-		throw GradleException("Unknown check mode: '$buildChecksMode', should be one of $expectedValues")
-	}
-	if (buildChecksMode != "off") {
-		val javaVersion = jadxBuildJavaVersion?.let { JavaVersion.toVersion(it) } ?: JavaVersion.current()
-		if (!javaVersion.isCompatibleWith(JavaVersion.VERSION_21)) {
-			throw GradleException("Error Prone requires Java 21")
-		}
-	}
-	return buildChecksMode
-}
-
 allprojects {
 	apply(plugin = "java")
 	apply(plugin = "checkstyle")
 	apply(plugin = "com.diffplug.spotless")
-	apply(plugin = "com.github.ben-manes.versions")
-	apply(plugin = "se.patrikerdes.use-latest-versions")
-
-	repositories {
-		mavenCentral()
-	}
 
 	configure<SpotlessExtension> {
 		java {
@@ -82,13 +55,6 @@ allprojects {
 			commonFormatOptions()
 		}
 	}
-
-	tasks.named<DependencyUpdatesTask>("dependencyUpdates") {
-		rejectVersionIf {
-			// disallow release candidates as upgradable versions from stable versions
-			isNonStable(candidate.version) && !isNonStable(currentVersion)
-		}
-	}
 }
 
 fun FormatExtension.commonFormatOptions() {
@@ -98,11 +64,12 @@ fun FormatExtension.commonFormatOptions() {
 	endWithNewline()
 }
 
-fun isNonStable(version: String): Boolean {
-	val stableKeyword = listOf("RELEASE", "FINAL", "GA").any { version.uppercase(Locale.getDefault()).contains(it) }
-	val regex = "^[0-9,.v-]+(-r)?$".toRegex()
-	val isStable = stableKeyword || regex.matches(version)
-	return isStable.not()
+versionCatalogUpdate {
+	sortByKey = true
+	versionSelector(VersionSelectors.STABLE)
+	keep {
+		keepUnusedVersions = true
+	}
 }
 
 fun loadEnv(file: File): Map<String, String> {

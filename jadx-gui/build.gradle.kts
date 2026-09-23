@@ -4,13 +4,15 @@ plugins {
 	id("jadx-kotlin")
 	id("application")
 	id("jadx-library")
-	id("com.gradleup.shadow") version "8.3.8"
-	id("edu.sc.seis.launch4j") version "4.0.0"
-	id("org.beryx.runtime") version "2.0.1"
+
+	alias(libs.plugins.shadow)
+	alias(libs.plugins.launch4j)
+	alias(libs.plugins.beryx.runtime)
 }
 
 dependencies {
 	implementation(project(":jadx-core"))
+	implementation(project(":jadx-gui-api"))
 	implementation(project(":jadx-cli"))
 	implementation(project(":jadx-plugins-tools"))
 	implementation(project(":jadx-commons:jadx-app-commons"))
@@ -18,44 +20,33 @@ dependencies {
 	// import mappings
 	implementation(project(":jadx-plugins:jadx-rename-mappings"))
 
-	implementation("org.jcommander:jcommander:2.0")
-	implementation("ch.qos.logback:logback-classic:1.5.21")
-	implementation("io.github.oshai:kotlin-logging-jvm:7.0.13")
+	implementation(libs.jcommander)
+	implementation(libs.logback.classic)
+	implementation(libs.oshai.kotlin.logging.jvm)
 
-	implementation("com.fifesoft:rsyntaxtextarea:3.6.1")
-	implementation("com.fifesoft:autocomplete:3.3.2")
-	implementation("org.drjekyll:fontchooser:3.1.0")
-	implementation("hu.kazocsaba:image-viewer:1.2.3")
-	implementation("com.twelvemonkeys.imageio:imageio-webp:3.12.0") // WebP support for image viewer
+	implementation(libs.bundles.rsta)
+	implementation(libs.fontchooser)
+	implementation(libs.image.viewer)
+	implementation(libs.imageio.webp) // WebP support for image viewer
 
-	implementation("com.formdev:flatlaf:3.7")
-	implementation("com.formdev:flatlaf-intellij-themes:3.7")
-	implementation("com.formdev:flatlaf-extras:3.7")
-	implementation("com.formdev:flatlaf-fonts-inter:4.1")
-	implementation("com.formdev:flatlaf-fonts-jetbrains-mono:2.304")
+	implementation(libs.bundles.flatlaf)
 
-	implementation("com.google.code.gson:gson:2.13.2")
-	implementation("org.apache.commons:commons-lang3:3.20.0")
-	implementation("org.apache.commons:commons-text:1.15.0")
-	implementation("commons-io:commons-io:2.21.0")
+	implementation(libs.gson)
+	implementation(libs.commons.lang3)
+	implementation(libs.commons.text)
+	implementation(libs.commons.io)
 
-	implementation("io.reactivex.rxjava3:rxjava:3.1.12")
-	implementation("com.github.akarnokd:rxjava3-swing:3.1.1")
-	implementation("com.android.tools.build:apksig:8.13.1")
-	implementation("io.github.skylot:jdwp:2.0.0")
+	implementation(libs.rxjava)
+	implementation(libs.rxjava.swing)
+
+	implementation(libs.apksig)
+	implementation(libs.jdwp)
 
 	// Library for hex viewing data
-	val bined = "0.2.2"
-	implementation("org.exbin.bined:bined-swing:$bined")
-	implementation("org.exbin.bined:bined-highlight-swing:$bined")
-	implementation("org.exbin.bined:bined-swing-section:$bined")
-	implementation("org.exbin.auxiliary:binary_data:$bined")
-	implementation("org.exbin.auxiliary:binary_data-array:$bined")
+	implementation(libs.bundles.bined)
 
 	// Library for rendering GraphViz DOT files
-	implementation("guru.nidi:graphviz-java:0.18.1")
-	implementation("com.eclipsesource.j2v8:j2v8_linux_x86_64:4.6.0")
-	implementation("com.eclipsesource.j2v8:j2v8_win32_x86_64:4.6.0")
+	implementation(libs.bundles.graphviz)
 
 	testImplementation(
 		project
@@ -111,9 +102,30 @@ tasks.jar {
 
 tasks.shadowJar {
 	isZip64 = true
+
+	// FAIL here used to catch all issues with duplicate files
+	// and may break build after new deps added
+	duplicatesStrategy = DuplicatesStrategy.FAIL
+
+	filesMatching("META-INF/services/**") {
+		// allow to merge service files
+		duplicatesStrategy = DuplicatesStrategy.INCLUDE
+	}
 	mergeServiceFiles()
+
+	filesMatching("META-INF/*.kotlin_module") {
+		// Kotlin modules will be merged
+		duplicatesStrategy = DuplicatesStrategy.WARN
+	}
+	filesMatching("com/eclipsesource/v8/**/*") {
+		// same files from Windows and Linux versions of com.eclipsesource.j2v8
+		duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+	}
+	// can't keep all LICENSE and NOTICE files from different libs
+	exclude("META-INF/LICENSE*", "META-INF/NOTICE*", "LICENSE", "NOTICE")
+
 	manifest {
-		from(tasks.jar.get().manifest)
+		attributes(mapOf("Main-Class" to application.mainClass.get()))
 	}
 }
 

@@ -13,7 +13,7 @@ dependencies {
 			.getByName("test")
 			.output,
 	)
-	testImplementation("org.apache.commons:commons-lang3:3.20.0")
+	testImplementation(libs.commons.lang3)
 
 	testRuntimeOnly(project(":jadx-plugins:jadx-smali-input"))
 }

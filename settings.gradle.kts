@@ -1,3 +1,20 @@
+pluginManagement {
+	repositories {
+		gradlePluginPortal()
+		mavenCentral()
+	}
+}
+
+@Suppress("UnstableApiUsage")
+dependencyResolutionManagement {
+	repositories {
+		mavenCentral()
+		// required for: aapt-proto, R8, Smali
+		google()
+	}
+	repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS
+}
+
 plugins {
 	id("org.gradle.toolchains.foojay-resolver-convention") version ("1.0.0")
 }
@@ -10,6 +27,7 @@ rootProject.name = "jadx"
 
 include("jadx-core")
 include("jadx-cli")
+include("jadx-gui-api")
 include("jadx-gui")
 include("jadx-mcp")
 

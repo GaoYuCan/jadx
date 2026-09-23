@@ -5,7 +5,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.function.Supplier;
 
 import org.jetbrains.annotations.Nullable;
@@ -71,6 +70,10 @@ public class PluginContext implements JadxPluginContext, JadxPluginRuntimeData, 
 	}
 
 	public void classLoaderWrap(Runnable task) {
+		classLoaderWrap(pluginClassLoader, task);
+	}
+
+	public static void classLoaderWrap(ClassLoader pluginClassLoader, Runnable task) {
 		Thread thread = Thread.currentThread();
 		ClassLoader prevClassLoader = thread.getContextClassLoader();
 		thread.setContextClassLoader(pluginClassLoader);
@@ -112,9 +115,12 @@ public class PluginContext implements JadxPluginContext, JadxPluginRuntimeData, 
 	}
 
 	@Override
-	public void registerOptions(JadxPluginOptions options) {
+	public void registerOptions(@Nullable JadxPluginOptions options) {
+		if (options == null) {
+			return;
+		}
+		this.options = options;
 		try {
-			this.options = Objects.requireNonNull(options);
 			options.setOptions(getArgs().getPluginOptions());
 		} catch (Exception e) {
 			throw new JadxRuntimeException("Failed to apply options for plugin: " + getPluginId(), e);

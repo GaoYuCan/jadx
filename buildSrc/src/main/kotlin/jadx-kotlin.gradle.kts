@@ -2,7 +2,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
 	id("jadx-java")
-	id("org.jetbrains.kotlin.jvm")
+
+	alias(libs.plugins.kotlin.jvm)
 }
 
 dependencies {
