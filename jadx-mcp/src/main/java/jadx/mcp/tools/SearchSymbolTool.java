@@ -15,6 +15,7 @@ import jadx.core.dex.nodes.ClassNode;
 import jadx.core.dex.nodes.FieldNode;
 import jadx.core.dex.nodes.MethodNode;
 import jadx.mcp.JadxSession;
+import jadx.mcp.fast.FastSymbolSearch;
 import jadx.mcp.format.SymbolFormat;
 import jadx.mcp.search.SearchEngine;
 import jadx.mcp.search.SymbolFilter;
@@ -153,6 +154,10 @@ public final class SearchSymbolTool extends AbstractTool {
 		if (engine == null && filter.isEmpty()) {
 			throw ToolException.invalidArg("query",
 					"either `query` or at least one `filter` constraint must be provided");
+		}
+		if (session.isFast()) {
+			return session.fastRead(project -> FastSymbolSearch.search(project, kind, engine,
+					matchFull, filter, skip, maxResults));
 		}
 
 		return session.read(decompiler -> {

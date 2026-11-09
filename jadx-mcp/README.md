@@ -121,11 +121,11 @@ jadx-mcp/bin/jadx-mcp.sh \
 
 | 工具 | 用途 |
 | --- | --- |
-| `open_file` | 加载或替换当前项目。支持 `.apk`、`.dex`、`.jar`、`.class`、`.smali`、`.zip`、`.aar`、`.arsc`、`.aab`、`.xapk`、`.apkm`、`.jadx`。再次调用会先关闭旧项目并清理缓存。 |
+| `open_file` | 加载或替换当前项目。支持 `.apk`、`.dex`、`.jar`、`.class`、`.smali`、`.zip`、`.aar`、`.arsc`、`.aab`、`.xapk`、`.apkm`、`.jadx`。`mode=auto` 默认让 APK/DEX 使用快速模式，其余使用完整模式；也可显式指定 `fast` 或 `full`。当前文件已经加载时直接返回；切换模式或参数须先调用 `close_file`。 |
 | `close_file` | 关闭当前项目并释放缓存。重复调用也是安全的。 |
-| `current_project` | 返回当前是否已加载项目，以及主输入文件的绝对路径、文件名、扩展名、大小和最后修改时间。 |
+| `current_project` | 返回当前是否已加载项目、实际模式，以及主输入文件的绝对路径、文件名、扩展名、大小和最后修改时间。 |
 | `save_project` | 把主输入文件和 MCP 中产生的 rename 记录保存为 jadx GUI 可打开的 v2 `.jadx` 项目文件。 |
-| `run_script` | 使用脚本路径或内联脚本文本，在当前已加载项目上执行 `.jadx.kts`；立即运行顶层代码和 `afterLoad`，不注册反编译 pass。 |
+| `run_script` | 使用脚本路径或内联脚本文本执行 `.jadx.kts`。快速模式必须提供 `class_fqns`，脚本只能看到指定类；全项目脚本使用完整模式。 |
 
 ### 浏览与导航
 
@@ -161,12 +161,14 @@ jadx-mcp/bin/jadx-mcp.sh \
 | --- | --- |
 | `search_symbol` | 按符号表搜索类、方法、字段。支持名称、正则、大小写、包前缀、注解、父类、接口、访问标志等过滤；不反编译。 |
 | `search_strings` | 在 dex 字符串常量、final 字段 encoded values、注解参数中搜索字符串；不反编译。 |
-| `search_code` | 在反编译 Java 或 smali 文本中全文搜索。第一次会按范围生成代码，成本最高，但结果会在会话内缓存。 |
+| `search_code` | 搜索 Java 或 smali 全文；快速模式只支持 smali，全局 Java 搜索需要完整模式。 |
 | `search_resource` | 在解码后的文本资源中搜索，支持正则、忽略大小写、路径前缀和 glob。 |
 | `xrefs_to` | 查询类、方法、字段的交叉引用。字段引用会区分 `read`、`write`、`init`。 |
 | `method_overrides` | 从一个方法向下查找子类或子接口中的重写，相当于 GUI 里的 Define Plus。 |
 | `inheritance_tree` | 查询类型层级。`up` 返回父类链和接口；`down` 返回子类或接口实现者；`transitive=true` 返回完整闭包。 |
 | `rename` | 对类、字段、方法或变量添加或更新用户重命名。 |
+
+快速模式按需反编译目标类，跨 DEX 引用返回调用方与字节码偏移；资源目录仅列元数据，请求 XML 时再解码。`rename`、`method_overrides`、`inheritance_tree` 和全局 Java 搜索需要 `mode=full`。快速模式不加载 `JADX_MCP_AUX_INPUTS`；`save_project` 和 `current_project` 在两种模式下均可使用。
 
 ## 字节码优先的默认设置
 

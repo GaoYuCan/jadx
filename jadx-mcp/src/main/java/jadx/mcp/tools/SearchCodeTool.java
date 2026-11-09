@@ -18,6 +18,7 @@ import jadx.mcp.format.RefEntry;
 import jadx.mcp.format.RefTable;
 import jadx.mcp.search.SearchEngine;
 import jadx.mcp.util.SchemaBuilder;
+import jadx.mcp.util.ToolException;
 
 /**
  * {@code search_code} tool: scans the raw decompiled Java source ({@code target=java}) or the disassembled
@@ -45,12 +46,13 @@ public final class SearchCodeTool extends AbstractTool {
 	@Override
 	public String description() {
 		return "Full-text search across decompiled Java (`target=java`) or smali (`target=smali`). "
+				+ "Fast mode supports `target=smali` only; global Java search requires full mode. "
 				+ "Supports regex and ignore_case (mirrors the search options in the GUI). Optionally restrict to "
 				+ "a `package_prefix`. Returns up to `max_results` hits with raw line numbers and snippets; if a "
 				+ "hit happens to land on a known reference, the entry includes a `ref_id` you can pass straight "
 				+ "to `resolve_ref`. The query targets the raw decompiled text -- not the line-number gutter or "
 				+ "any inline comments added by `decompile_code`."
-				+ "\n\nLarge APKs: this tool MUST decompile every class in scope on the first run. Decompiled "
+				+ "\n\nIn full mode, large scans must decompile every class in scope on the first run. Decompiled "
 				+ "code is cached for the lifetime of the session (jadx's InMemoryCodeCache), so subsequent "
 				+ "`search_code` calls — and any `decompile_code` / `xrefs_to` on the same class — are fast. "
 				+ "To stay within the MCP transport timeout, the scan is bounded by `time_budget_ms` (default 30s); "
@@ -107,6 +109,81 @@ public final class SearchCodeTool extends AbstractTool {
 		SearchEngine engine = new SearchEngine(query, regex, ignoreCase);
 		long deadlineNanos = budgetMs > 0 ? System.nanoTime() + budgetMs * 1_000_000L : Long.MAX_VALUE;
 		long startNanos = System.nanoTime();
+		if (session.isFast()) {
+			if (!smali) {
+				throw new ToolException(ToolException.Code.UNSUPPORTED,
+						"Global Java search requires full mode. Call close_file, then open_file with mode=full.");
+			}
+			return session.fastRead(project -> {
+				List<Map<String, Object>> hits = new ArrayList<>();
+				boolean cursorReached = startClassFqn == null;
+				boolean exceededBudget = false;
+				String nextClassFqn = null;
+				int nextOffset = -1;
+				int seen = 0;
+				int scanned = 0;
+				for (String fqn : project.classes().keySet().stream().sorted().toList()) {
+					if (!cursorReached) {
+						cursorReached = fqn.equals(startClassFqn);
+						if (!cursorReached) {
+							continue;
+						}
+					}
+					if (fqn.substring(fqn.lastIndexOf('.') + 1).contains("$")
+							|| pkgPrefix != null && !fqn.startsWith(pkgPrefix)) {
+						continue;
+					}
+					if (System.nanoTime() >= deadlineNanos) {
+						exceededBudget = true;
+						nextClassFqn = fqn;
+						break;
+					}
+					scanned++;
+					String code = project.find(fqn).data().getDisassembledCode();
+					int classSeen = 0;
+					int pos = 0;
+					while (pos < code.length()) {
+						int found = engine.find(code, pos);
+						if (found < 0) {
+							break;
+						}
+						seen++;
+						classSeen++;
+						if (seen > skip) {
+							int lineStart = CodeUtils.getLineStartForPos(code, found);
+							int lineEnd = CodeUtils.getLineEndForPos(code, found);
+							Map<String, Object> row = new LinkedHashMap<>();
+							row.put("class_fqn", fqn);
+							row.put("source", "smali");
+							row.put("line", countLinesUpTo(code, found));
+							row.put("snippet", code.substring(lineStart, lineEnd).trim());
+							hits.add(row);
+							if (hits.size() >= maxResults) {
+								nextClassFqn = fqn;
+								nextOffset = classSeen;
+								break;
+							}
+						}
+						pos = Math.max(found + 1, CodeUtils.getLineEndForPos(code, found) + 1);
+					}
+					if (hits.size() >= maxResults) {
+						break;
+					}
+				}
+				Map<String, Object> result = new LinkedHashMap<>();
+				result.put("hits", hits);
+				result.put("count", hits.size());
+				result.put("offset", skip);
+				result.put("next_offset", nextOffset);
+				result.put("classes_scanned", scanned);
+				result.put("elapsed_ms", (System.nanoTime() - startNanos) / 1_000_000L);
+				result.put("exceeded_budget", exceededBudget);
+				if (nextClassFqn != null) {
+					result.put("next_class_fqn", nextClassFqn);
+				}
+				return result;
+			});
+		}
 		return session.read(decompiler -> {
 			List<Map<String, Object>> hits = new ArrayList<>();
 			int seen = 0;

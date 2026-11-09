@@ -17,6 +17,7 @@ import jadx.api.JavaMethod;
 import jadx.api.JavaNode;
 import jadx.api.utils.CodeUtils;
 import jadx.mcp.JadxSession;
+import jadx.mcp.fast.FastXrefs;
 import jadx.mcp.format.RefEntry;
 import jadx.mcp.format.RefTable;
 import jadx.mcp.search.FieldOpScanner;
@@ -55,7 +56,8 @@ public final class XrefsToTool extends AbstractTool {
 				+ "`read` / `write` / `init` (write inside `<init>` / `<clinit>`), `op_locations` collects every "
 				+ "instruction in the using method that touches the field with `{op, insn_offset}` pairs, and "
 				+ "the response gains an `op_summary` count (`{read_count, write_count, init_count}`). "
-				+ "For class / method targets, no `op` field appears.";
+				+ "For class / method targets, no `op` field appears. In fast mode, results contain caller "
+				+ "methods and bytecode `insn_offsets`; source snippets and `ref_id`s require full mode.";
 	}
 
 	@Override
@@ -74,6 +76,9 @@ public final class XrefsToTool extends AbstractTool {
 		String kind = requireString(args, "kind");
 		String descriptor = optString(args, "descriptor");
 		int maxResults = Math.max(1, optInt(args, "max_results", 500));
+		if (session.isFast()) {
+			return session.fastRead(project -> FastXrefs.search(project, fqn, kind, descriptor, maxResults));
+		}
 
 		return session.read(decompiler -> {
 			JavaNode subject = resolveSubject(fqn, kind, descriptor);

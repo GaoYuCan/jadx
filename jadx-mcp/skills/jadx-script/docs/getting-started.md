@@ -48,9 +48,11 @@
 ```json
 {
   "path": "/absolute/path/app.apk",
-  "skip_resources": false
+  "mode": "full"
 }
 ```
+
+`open_file` 默认 `mode=auto`，APK/DEX 会进入快速模式。全项目遍历、资源脚本使用 `mode=full`；只分析已知类时可保留快速模式。
 
 输入也可以是 `.dex`、`.jar`、`.class`、`.smali`、`.aar`、`.aab`、`.xapk`、`.apkm` 或已保存的 `.jadx` 项目。
 
@@ -74,6 +76,8 @@
 }
 ```
 
+快速模式还须提供 `class_fqns`，例如 `"class_fqns": ["com.example.Target"]`。脚本的 JADX 视图只含这些类；跨类遍历与资源脚本须在完整模式运行。`current_project.mode` 可确认实际模式。
+
 约束：
 
 - `script_path` 和 `script_text` 必须严格二选一；
@@ -83,7 +87,7 @@
 - 路径文件名必须以 `.jadx.kts` 结尾；
 - 文本模式会创建临时 `.jadx.kts`，执行后删除。
 
-runner 对当前已经加载的 `JadxDecompiler` 执行脚本，不重新打开项目。
+完整模式在当前 `JadxDecompiler` 上执行脚本；快速模式为指定类创建临时局部视图，不重新打开原始输入。
 
 ## 返回值
 

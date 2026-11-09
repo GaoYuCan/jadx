@@ -1,9 +1,12 @@
 package jadx.mcp.tools;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
@@ -14,6 +17,8 @@ import jadx.core.dex.info.AccessInfo;
 import jadx.core.dex.instructions.args.ArgType;
 import jadx.core.dex.nodes.ClassNode;
 import jadx.mcp.JadxSession;
+import jadx.mcp.fast.FastProject;
+import jadx.mcp.fast.FastProject.ClassEntry;
 import jadx.mcp.format.SymbolFormat;
 import jadx.mcp.util.SchemaBuilder;
 import jadx.mcp.util.ToolException;
@@ -79,6 +84,10 @@ public final class ListClassesTool extends AbstractTool {
 		boolean includeInner = optBool(args, "include_inner", false);
 		int maxResults = Math.max(1, optInt(args, "max_results", 500));
 		int skip = Math.max(0, optInt(args, "offset", 0));
+		if (session.isFast()) {
+			return session.fastRead(project -> listFast(project, pkgPrefix, maxDepth,
+					includeInner, maxResults, skip));
+		}
 
 		return session.read(decompiler -> {
 			List<Map<String, Object>> subpackages = collectSubpackages(decompiler, pkgPrefix);
@@ -121,6 +130,95 @@ public final class ListClassesTool extends AbstractTool {
 			body.put("next_offset", hasMore ? skip + hits.size() : -1);
 			return body;
 		});
+	}
+
+	private static Map<String, Object> listFast(FastProject project, String prefix, int maxDepth,
+			boolean includeInner, int maxResults, int skip) {
+		List<ClassEntry> source = project.classes().values().stream()
+				.sorted(Comparator.comparing(ClassEntry::fqn)).toList();
+		List<Map<String, Object>> hits = new ArrayList<>();
+		Map<String, int[]> childCounts = new java.util.TreeMap<>();
+		Map<String, Set<String>> grandchildren = new java.util.HashMap<>();
+		int matched = 0;
+		for (ClassEntry entry : source) {
+			String rawFqn = entry.fqn();
+			String fqn = project.displayClassFqn(rawFqn);
+			String pkg = fqn.substring(0, Math.max(0, fqn.lastIndexOf('.')));
+			String rawPkg = rawFqn.substring(0, Math.max(0, rawFqn.lastIndexOf('.')));
+			if (depthRelativeTo(pkg, prefix) == null) {
+				pkg = rawPkg;
+			}
+			String child = immediateChild(pkg, prefix);
+			if (child != null) {
+				int[] counts = childCounts.computeIfAbsent(child, ignored -> new int[2]);
+				counts[1]++;
+				if (pkg.equals(child)) {
+					counts[0]++;
+				}
+				String below = immediateChild(pkg, child);
+				if (below != null) {
+					grandchildren.computeIfAbsent(child, ignored -> new TreeSet<>()).add(below);
+				}
+			}
+			if (!includeInner && rawFqn.substring(rawFqn.lastIndexOf('.') + 1).contains("$")) {
+				continue;
+			}
+			Integer depth = depthRelativeTo(pkg, prefix);
+			if (depth == null || maxDepth != 0 && depth >= maxDepth) {
+				continue;
+			}
+			if (matched++ < skip || hits.size() >= maxResults) {
+				continue;
+			}
+			AccessInfo access = new AccessInfo(entry.access(), AccessInfo.AFType.CLASS);
+			Map<String, Object> row = new LinkedHashMap<>();
+			row.put("target", rawFqn);
+			row.put("fqn", fqn);
+			row.put("name", lastSegment(fqn));
+			if (!fqn.equals(rawFqn)) {
+				row.put("raw_fqn", rawFqn);
+			}
+			row.put("kind", SymbolFormat.classKind(access));
+			row.put("access", SymbolFormat.accessTokens(access, AccessInfo.AFType.CLASS));
+			row.put("is_inner", rawFqn.substring(rawFqn.lastIndexOf('.') + 1).contains("$"));
+			if (entry.superClass() != null) {
+				row.put("super_class", entry.superClass());
+			}
+			row.put("interfaces", entry.interfaces());
+			row.put("source_dex", entry.reader().getInputFileName());
+			hits.add(row);
+		}
+		List<Map<String, Object>> subpackages = new ArrayList<>();
+		for (Map.Entry<String, int[]> child : childCounts.entrySet()) {
+			Map<String, Object> row = new LinkedHashMap<>();
+			row.put("fqn", child.getKey());
+			row.put("name", lastSegment(child.getKey()));
+			row.put("direct_class_count", child.getValue()[0]);
+			row.put("recursive_class_count", child.getValue()[1]);
+			row.put("sub_package_count", grandchildren.getOrDefault(child.getKey(), Set.of()).size());
+			subpackages.add(row);
+		}
+		Map<String, Object> body = new LinkedHashMap<>();
+		body.put("package_prefix", prefix);
+		body.put("max_depth", maxDepth);
+		body.put("include_inner", includeInner);
+		body.put("subpackages", subpackages);
+		body.put("classes", hits);
+		body.put("count", hits.size());
+		body.put("matched_total", matched);
+		body.put("offset", skip);
+		body.put("next_offset", matched > skip + hits.size() ? skip + hits.size() : -1);
+		return body;
+	}
+
+	private static String immediateChild(String pkg, String prefix) {
+		String base = prefix == null || prefix.isEmpty() ? "" : prefix + '.';
+		if (!pkg.startsWith(base) || pkg.length() <= base.length()) {
+			return null;
+		}
+		String tail = pkg.substring(base.length());
+		int dot = tail.indexOf('.');
+		return base + (dot < 0 ? tail : tail.substring(0, dot));
 	}
 
 	// ---------- depth-aware filtering ----------

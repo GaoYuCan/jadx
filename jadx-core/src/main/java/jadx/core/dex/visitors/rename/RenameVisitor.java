@@ -1,6 +1,5 @@
 package jadx.core.dex.visitors.rename;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -32,8 +31,7 @@ public class RenameVisitor extends AbstractVisitor {
 
 	@Override
 	public void init(RootNode root) {
-		List<File> inputFiles = root.getArgs().getInputFiles();
-		if (inputFiles.isEmpty()) {
+		if (root.getClasses(true).isEmpty()) {
 			return;
 		}
 		process(root);

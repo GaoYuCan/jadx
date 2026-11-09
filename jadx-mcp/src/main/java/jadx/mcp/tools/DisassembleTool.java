@@ -2,6 +2,7 @@ package jadx.mcp.tools;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
@@ -48,6 +49,14 @@ public final class DisassembleTool extends AbstractTool {
 
 	@Override
 	protected Object call(Map<String, Object> args) {
+		if (session.isFast()) {
+			Target target = TargetParser.parse(requireString(args, "target"));
+			return session.withFastScope(Set.of(target.classFqn()), () -> callLoaded(args));
+		}
+		return callLoaded(args);
+	}
+
+	private Object callLoaded(Map<String, Object> args) {
 		Target target = TargetParser.parse(requireString(args, "target"));
 		boolean lineNumbers = optBool(args, "line_numbers", true);
 		return session.read(decompiler -> {

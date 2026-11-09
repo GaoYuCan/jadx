@@ -10,9 +10,9 @@ import jadx.core.plugins.files.IJadxFilesGetter;
  * jadx-mcp's implementation of {@link IJadxFilesGetter}, mirroring the one in jadx-cli.
  * Kept private to this module so jadx-mcp doesn't have to depend on jadx-cli.
  */
-final class JadxMcpFilesGetter implements IJadxFilesGetter {
+public final class JadxMcpFilesGetter implements IJadxFilesGetter {
 
-	static final JadxMcpFilesGetter INSTANCE = new JadxMcpFilesGetter();
+	public static final JadxMcpFilesGetter INSTANCE = new JadxMcpFilesGetter();
 
 	private JadxMcpFilesGetter() {
 	}

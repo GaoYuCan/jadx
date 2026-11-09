@@ -11,7 +11,8 @@ public interface ICodeAnnotation {
 		VAR_REF,
 		DECLARATION,
 		OFFSET,
-		END // class or method body end
+		END, // class or method body end
+		RAW_REF // symbol without a loaded declaration node
 	}
 
 	AnnType getAnnType();

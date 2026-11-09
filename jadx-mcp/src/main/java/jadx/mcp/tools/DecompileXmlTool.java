@@ -1,6 +1,7 @@
 package jadx.mcp.tools;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
@@ -51,47 +52,52 @@ public final class DecompileXmlTool extends AbstractTool {
 	protected Object call(Map<String, Object> args) {
 		String path = requireString(args, "resource_path");
 		boolean lineNumbers = optBool(args, "line_numbers", true);
-		return session.read(decompiler -> {
-			ResourceFile match = null;
-			for (ResourceFile rf : decompiler.getResources()) {
-				if (rf.getOriginalName().equals(path) || rf.getDeobfName().equals(path)) {
+		if (session.isFast()) {
+			return session.fastRead(project -> decode(project.resources(), path, lineNumbers));
+		}
+		return session.read(decompiler -> decode(decompiler.getResources(), path, lineNumbers));
+	}
+
+	private Object decode(List<ResourceFile> resources, String path, boolean lineNumbers) {
+		ResourceFile match = null;
+		for (ResourceFile rf : resources) {
+			if (rf.getOriginalName().equals(path) || rf.getDeobfName().equals(path)) {
+				match = rf;
+				break;
+			}
+		}
+		if (match == null) {
+			// jadx resource paths sometimes start with archive prefixes.
+			for (ResourceFile rf : resources) {
+				if (rf.getOriginalName().endsWith(path) || rf.getDeobfName().endsWith(path)) {
 					match = rf;
 					break;
 				}
 			}
-			if (match == null) {
-				// fall back to suffix match (jadx resource paths sometimes start with archive prefixes)
-				for (ResourceFile rf : decompiler.getResources()) {
-					if (rf.getOriginalName().endsWith(path) || rf.getDeobfName().endsWith(path)) {
-						match = rf;
-						break;
-					}
-				}
-			}
-			if (match == null) {
-				throw ToolException.notFound("resource", path);
-			}
-			ResContainer container = match.loadContent();
-			if (container == null) {
-				throw new ToolException(ToolException.Code.UNSUPPORTED,
-						"Resource has no decoded content: " + match.getDeobfName());
-			}
-			if (container.getDataType() != ResContainer.DataType.TEXT
-					&& container.getDataType() != ResContainer.DataType.RES_TABLE) {
-				Map<String, Object> details = new LinkedHashMap<>();
-				details.put("resource_path", match.getDeobfName());
-				details.put("data_type", container.getDataType().name());
-				details.put("resource_type", match.getType().name());
-				throw new ToolException(ToolException.Code.UNSUPPORTED,
-						"Resource is not text: " + match.getDeobfName(), details);
-			}
-			ICodeInfo text = container.getText();
-			String code = text == null ? "" : text.getCodeStr();
-			Map<String, Object> result = new LinkedHashMap<>();
-			result.put("resource_path", match.getDeobfName());
-			result.put("resource_type", match.getType().name());
-			result.put("code", lineNumbers ? LineNumberPrefixer.prefix(code) : code);
-			return result;
-		});
+		}
+		if (match == null) {
+			throw ToolException.notFound("resource", path);
+		}
+		ResContainer container = match.loadContent();
+		if (container == null) {
+			throw new ToolException(ToolException.Code.UNSUPPORTED,
+					"Resource has no decoded content: " + match.getDeobfName());
+		}
+		if (container.getDataType() != ResContainer.DataType.TEXT
+				&& container.getDataType() != ResContainer.DataType.RES_TABLE) {
+			Map<String, Object> details = new LinkedHashMap<>();
+			details.put("resource_path", match.getDeobfName());
+			details.put("data_type", container.getDataType().name());
+			details.put("resource_type", match.getType().name());
+			throw new ToolException(ToolException.Code.UNSUPPORTED,
+					"Resource is not text: " + match.getDeobfName(), details);
+		}
+		ICodeInfo text = container.getText();
+		String code = text == null ? "" : text.getCodeStr();
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("resource_path", match.getDeobfName());
+		result.put("resource_type", match.getType().name());
+		result.put("code", lineNumbers ? LineNumberPrefixer.prefix(code) : code);
+		return result;
 	}
 }

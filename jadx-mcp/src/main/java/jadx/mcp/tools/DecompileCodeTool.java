@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
@@ -71,6 +72,14 @@ public final class DecompileCodeTool extends AbstractTool {
 
 	@Override
 	protected Object call(Map<String, Object> args) {
+		if (session.isFast()) {
+			Target target = TargetParser.parse(requireString(args, "target"));
+			return session.withFastScope(Set.of(target.classFqn()), () -> callLoaded(args));
+		}
+		return callLoaded(args);
+	}
+
+	private Object callLoaded(Map<String, Object> args) {
 		Target target = TargetParser.parse(requireString(args, "target"));
 		String annotate = optString(args, "annotate", "sidecar");
 		boolean lineNumbers = optBool(args, "line_numbers", true);

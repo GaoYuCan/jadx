@@ -2,8 +2,10 @@ package jadx.mcp.tools;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
@@ -62,6 +64,23 @@ public final class ListClassMembersTool extends AbstractTool {
 
 	@Override
 	protected Object call(Map<String, Object> args) {
+		if (session.isFast()) {
+			String fqn = requireString(args, "class_fqn");
+			Set<String> scope = session.fastRead(project -> {
+				Set<String> names = new LinkedHashSet<>();
+				String next = project.find(fqn).fqn();
+				while (next != null && project.classes().containsKey(next) && names.add(next)) {
+					next = optBool(args, "include_inherited", false)
+							? project.find(next).superClass() : null;
+				}
+				return names;
+			});
+			return session.withFastScope(scope, () -> callLoaded(args));
+		}
+		return callLoaded(args);
+	}
+
+	private Object callLoaded(Map<String, Object> args) {
 		String classFqn = requireString(args, "class_fqn");
 		boolean includeInherited = optBool(args, "include_inherited", false);
 

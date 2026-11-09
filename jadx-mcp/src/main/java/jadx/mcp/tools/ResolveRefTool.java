@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
@@ -57,6 +58,14 @@ public final class ResolveRefTool extends AbstractTool {
 
 	@Override
 	protected Object call(Map<String, Object> args) {
+		if (session.isFast()) {
+			String classFqn = requireString(args, "class_fqn");
+			return session.withFastScope(Set.of(classFqn), () -> callLoaded(args));
+		}
+		return callLoaded(args);
+	}
+
+	private Object callLoaded(Map<String, Object> args) {
 		String classFqn = requireString(args, "class_fqn");
 		String refId = requireString(args, "ref_id");
 		int maxUses = Math.max(0, optInt(args, "max_uses", 10));

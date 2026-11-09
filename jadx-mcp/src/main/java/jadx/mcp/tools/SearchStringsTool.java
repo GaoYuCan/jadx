@@ -117,6 +117,53 @@ public final class SearchStringsTool extends AbstractTool {
 		SearchEngine engine = new SearchEngine(query, regex, ignoreCase);
 		long deadlineNanos = budgetMs > 0 ? System.nanoTime() + budgetMs * 1_000_000L : Long.MAX_VALUE;
 		long startNanos = System.nanoTime();
+		if (session.isFast()) {
+			return session.fastRead(project -> {
+				List<Map<String, Object>> hits = new ArrayList<>();
+				Counter seen = new Counter();
+				boolean cursorReached = startClassFqn == null;
+				boolean exceededBudget = false;
+				boolean hitLimit = false;
+				String nextClassFqn = null;
+				int nextOffset = -1;
+				int scanned = 0;
+				for (String fqn : project.classes().keySet().stream().sorted().toList()) {
+					if (!cursorReached) {
+						cursorReached = fqn.equals(startClassFqn);
+						if (!cursorReached) {
+							continue;
+						}
+					}
+					if (pkgPrefix != null && !fqn.startsWith(pkgPrefix)) {
+						continue;
+					}
+					if (System.nanoTime() >= deadlineNanos) {
+						exceededBudget = true;
+						nextClassFqn = fqn;
+						break;
+					}
+					scanned++;
+					int seenBeforeClass = seen.value;
+					if (scanClass(fqn, project.find(fqn).data(), engine, include,
+							hits, seen, skip, maxResults)) {
+						hitLimit = true;
+						nextClassFqn = fqn;
+						nextOffset = seen.value - seenBeforeClass;
+						break;
+					}
+				}
+				Map<String, Object> result = new LinkedHashMap<>();
+				result.put("hits", hits);
+				result.put("count", hits.size());
+				result.put("offset", skip);
+				result.put("next_offset", hitLimit ? nextOffset : -1);
+				result.put("next_class_fqn", nextClassFqn);
+				result.put("classes_scanned", scanned);
+				result.put("elapsed_ms", (System.nanoTime() - startNanos) / 1_000_000L);
+				result.put("exceeded_budget", exceededBudget);
+				return result;
+			});
+		}
 
 		return session.read(decompiler -> {
 			List<Map<String, Object>> hits = new ArrayList<>();
@@ -158,7 +205,7 @@ public final class SearchStringsTool extends AbstractTool {
 				}
 				classesScanned++;
 
-				hitLimit = scanClass(cls, clsData, engine, include, hits, seen, skip, maxResults);
+				hitLimit = scanClass(cls.getFullName(), clsData, engine, include, hits, seen, skip, maxResults);
 				if (hitLimit) {
 					// Resume from the SAME class on next call: there may be more matches in cls beyond
 					// the ones we've returned. Caller bumps `offset` to skip already-returned hits.
@@ -181,9 +228,8 @@ public final class SearchStringsTool extends AbstractTool {
 	}
 
 	/** Scans one class. Returns true if {@code maxResults} was hit (caller should stop). */
-	private static boolean scanClass(JavaClass cls, IClassData clsData, SearchEngine engine,
+	private static boolean scanClass(String classFqn, IClassData clsData, SearchEngine engine,
 			Set<String> include, List<Map<String, Object>> hits, Counter seen, int skip, int maxResults) {
-		String classFqn = cls.getFullName();
 
 		// (1) Class-level annotations
 		if (include.contains(KIND_ANNOTATION)) {

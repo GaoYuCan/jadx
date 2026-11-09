@@ -2,6 +2,7 @@ package jadx.mcp;
 
 import java.io.Closeable;
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -27,6 +28,7 @@ import jadx.api.data.ICodeRename;
 import jadx.api.data.impl.JadxCodeData;
 import jadx.api.impl.AnnotatedCodeWriter;
 import jadx.mcp.format.RefTableCache;
+import jadx.mcp.fast.FastProject;
 import jadx.mcp.util.ToolException;
 import jadx.plugins.tools.JadxExternalPluginsLoader;
 
@@ -66,21 +68,27 @@ public final class JadxSession implements Closeable {
 	private JadxCodeData codeData = new JadxCodeData();
 
 	private JadxDecompiler decompiler;
+	private FastProject fastProject;
+	private final ThreadLocal<JadxDecompiler> scopedDecompiler = new ThreadLocal<>();
 
-	public void load(File inputFile, List<File> auxInputs, boolean skipResources, int threadsCount) {
-		load(inputFile, List.of(inputFile), new JadxCodeData(), auxInputs, skipResources, threadsCount);
+	public LoadResult load(File inputFile, List<File> auxInputs, boolean skipResources, int threadsCount) {
+		return load(inputFile, List.of(inputFile), new JadxCodeData(), auxInputs, skipResources, threadsCount);
 	}
 
-	public void loadProject(File projectFile, List<File> projectInputFiles, JadxCodeData projectCodeData,
+	public LoadResult loadProject(File projectFile, List<File> projectInputFiles, JadxCodeData projectCodeData,
 			List<File> auxInputs, boolean skipResources, int threadsCount) {
-		load(projectFile, projectInputFiles, projectCodeData, auxInputs, skipResources, threadsCount);
+		return load(projectFile, projectInputFiles, projectCodeData, auxInputs, skipResources, threadsCount);
 	}
 
-	private void load(File inputFile, List<File> projectInputFiles, JadxCodeData projectCodeData,
+	private LoadResult load(File inputFile, List<File> projectInputFiles, JadxCodeData projectCodeData,
 			List<File> auxInputs, boolean skipResources, int threadsCount) {
 		lock.writeLock().lock();
 		try {
+			if (isLoadedLocked() && sameFile(this.inputFile, inputFile)) {
+				return LoadResult.ALREADY_LOADED;
+			}
 			closeDecompilerLocked();
+			closeFastLocked();
 			this.inputFile = inputFile;
 			this.projectInputFiles = List.copyOf(projectInputFiles);
 			this.auxInputs = auxInputs == null ? Collections.emptyList() : List.copyOf(auxInputs);
@@ -88,14 +96,56 @@ public final class JadxSession implements Closeable {
 			this.threadsCount = threadsCount;
 			this.codeData = copyCodeData(projectCodeData);
 			openDecompilerLocked();
+			return LoadResult.LOADED;
 		} finally {
 			lock.writeLock().unlock();
 		}
 	}
 
+	public LoadResult loadFast(File inputFile, List<File> projectInputs, JadxCodeData projectCodeData)
+			throws IOException {
+		lock.writeLock().lock();
+		try {
+			if (isLoadedLocked() && sameFile(this.inputFile, inputFile)) {
+				return LoadResult.ALREADY_LOADED;
+			}
+			FastProject next = new FastProject(projectInputs, copyCodeData(projectCodeData));
+			closeDecompilerLocked();
+			closeFastLocked();
+			this.inputFile = inputFile;
+			this.projectInputFiles = List.copyOf(projectInputs);
+			this.auxInputs = Collections.emptyList();
+			this.skipResources = false;
+			this.threadsCount = 0;
+			this.codeData = copyCodeData(projectCodeData);
+			this.fastProject = next;
+			return LoadResult.LOADED;
+		} finally {
+			lock.writeLock().unlock();
+		}
+	}
+
+	private static boolean sameFile(File first, File second) {
+		try {
+			return first.getCanonicalFile().equals(second.getCanonicalFile());
+		} catch (IOException e) {
+			return first.getAbsoluteFile().toPath().normalize()
+					.equals(second.getAbsoluteFile().toPath().normalize());
+		}
+	}
+
+	public enum LoadResult {
+		LOADED,
+		ALREADY_LOADED
+	}
+
 	public void reload() {
 		lock.writeLock().lock();
 		try {
+			if (fastProject != null) {
+				throw new ToolException(ToolException.Code.UNSUPPORTED,
+						"Reload requires full mode. Close and reopen with mode=full.");
+			}
 			closeDecompilerLocked();
 			openDecompilerLocked();
 		} finally {
@@ -118,9 +168,10 @@ public final class JadxSession implements Closeable {
 	public CloseSnapshot closeAndSnapshot() {
 		lock.writeLock().lock();
 		try {
-			boolean wasLoaded = decompiler != null;
+			boolean wasLoaded = isLoadedLocked();
 			File previous = inputFile;
 			closeDecompilerLocked();
+			closeFastLocked();
 			// Forget the input metadata so getInputFile()/isLoaded() report the truthful "nothing loaded"
 			// state.
 			// reload() doesn't reach here because it calls closeDecompilerLocked() directly, preserving the
@@ -248,6 +299,69 @@ public final class JadxSession implements Closeable {
 		}
 	}
 
+	private void closeFastLocked() {
+		if (fastProject != null) {
+			fastProject.close();
+			fastProject = null;
+		}
+	}
+
+	public boolean isFast() {
+		lock.readLock().lock();
+		try {
+			return fastProject != null;
+		} finally {
+			lock.readLock().unlock();
+		}
+	}
+
+	public String mode() {
+		lock.readLock().lock();
+		try {
+			return fastProject != null ? "fast" : decompiler != null ? "full" : "none";
+		} finally {
+			lock.readLock().unlock();
+		}
+	}
+
+	public <T> T fastRead(Function<FastProject, T> action) {
+		lock.readLock().lock();
+		try {
+			ensureLoaded();
+			if (fastProject == null) {
+				throw new IllegalStateException("Fast project is not active");
+			}
+			return action.apply(fastProject);
+		} finally {
+			lock.readLock().unlock();
+		}
+	}
+
+	/** Run one targeted operation in a short-lived JADX context backed by the original DEX. */
+	public <T> T withFastScope(Set<String> classNames, Supplier<T> action) {
+		lock.writeLock().lock();
+		try {
+			ensureLoaded();
+			if (fastProject == null) {
+				throw new IllegalStateException("Fast project is not active");
+			}
+			try (JadxDecompiler local = fastProject.decompiler(classNames)) {
+				scopedDecompiler.set(local);
+				try {
+					return action.get();
+				} finally {
+					scopedDecompiler.remove();
+				}
+			}
+		} finally {
+			lock.writeLock().unlock();
+		}
+	}
+
+	private boolean isLoadedLocked() {
+		return decompiler != null || fastProject != null;
+	}
+
 	/**
 	 * Run a read-only action while holding the read lock.
 	 */
@@ -255,7 +369,9 @@ public final class JadxSession implements Closeable {
 		lock.readLock().lock();
 		try {
 			ensureLoaded();
-			return action.apply(decompiler);
+			ensureFullMode();
+			JadxDecompiler current = scopedDecompiler.get();
+			return action.apply(current != null ? current : decompiler);
 		} finally {
 			lock.readLock().unlock();
 		}
@@ -268,6 +384,7 @@ public final class JadxSession implements Closeable {
 		lock.readLock().lock();
 		try {
 			ensureLoaded();
+			ensureFullMode();
 			return action.get();
 		} finally {
 			lock.readLock().unlock();
@@ -284,7 +401,9 @@ public final class JadxSession implements Closeable {
 		lock.writeLock().lock();
 		try {
 			ensureLoaded();
-			return action.apply(decompiler);
+			ensureFullMode();
+			JadxDecompiler current = scopedDecompiler.get();
+			return action.apply(current != null ? current : decompiler);
 		} finally {
 			lock.writeLock().unlock();
 		}
@@ -296,6 +415,11 @@ public final class JadxSession implements Closeable {
 	 */
 	@Nullable
 	public JavaClass findClass(String fqn) {
+		JadxDecompiler current = scopedDecompiler.get();
+		if (current != null) {
+			JavaClass byRaw = current.searchJavaClassByOrigFullName(fqn);
+			return byRaw != null ? byRaw : current.searchJavaClassByAliasFullName(fqn);
+		}
 		JavaClass cached = fqnIndex.get(fqn);
 		if (cached != null) {
 			return cached;
@@ -325,7 +449,7 @@ public final class JadxSession implements Closeable {
 
 	/** Snapshot of "is a project currently loaded?" — safe to call without holding any lock. */
 	public boolean isLoaded() {
-		return decompiler != null;
+		return decompiler != null || fastProject != null;
 	}
 
 	/**
@@ -333,7 +457,8 @@ public final class JadxSession implements Closeable {
 	 * Must be called while holding the read lock (via {@link #read}) when isLoaded() may change.
 	 */
 	public int loadedClassCount() {
-		return decompiler == null ? 0 : decompiler.getClassesWithInners().size();
+		return fastProject != null ? fastProject.classCount()
+				: decompiler == null ? 0 : decompiler.getClassesWithInners().size();
 	}
 
 	/**
@@ -361,7 +486,8 @@ public final class JadxSession implements Closeable {
 		lock.readLock().lock();
 		try {
 			return new ProjectSnapshot(
-					decompiler != null,
+					isLoadedLocked(),
+					fastProject != null ? "fast" : decompiler != null ? "full" : "none",
 					inputFile,
 					List.copyOf(projectInputFiles),
 					copyCodeData(codeData));
@@ -372,14 +498,16 @@ public final class JadxSession implements Closeable {
 
 	public static final class ProjectSnapshot {
 		public final boolean loaded;
+		public final String mode;
 		public final @Nullable File inputFile;
 		public final List<File> projectInputFiles;
 		public final JadxCodeData codeData;
 		public final List<ICodeRename> renames;
 
-		private ProjectSnapshot(boolean loaded, @Nullable File inputFile,
+		private ProjectSnapshot(boolean loaded, String mode, @Nullable File inputFile,
 				List<File> projectInputFiles, JadxCodeData codeData) {
 			this.loaded = loaded;
+			this.mode = mode;
 			this.inputFile = inputFile;
 			this.projectInputFiles = projectInputFiles;
 			this.codeData = codeData;
@@ -398,6 +526,7 @@ public final class JadxSession implements Closeable {
 		lock.writeLock().lock();
 		try {
 			ensureLoaded();
+			ensureFullMode();
 			RenameMutation<T> mutation = resolver.apply(decompiler);
 			JadxCodeData previousCodeData = codeData;
 			JadxCodeData updatedCodeData = copyCodeData(previousCodeData);
@@ -526,9 +655,16 @@ public final class JadxSession implements Closeable {
 	}
 
 	private void ensureLoaded() {
-		if (decompiler == null) {
+		if (!isLoadedLocked()) {
 			throw new ToolException(ToolException.Code.NOT_LOADED,
 					"No jadx project is currently loaded. Call `open_file` with the APK / DEX / JAR path first.");
+		}
+	}
+
+	private void ensureFullMode() {
+		if (fastProject != null && scopedDecompiler.get() == null) {
+			throw new ToolException(ToolException.Code.UNSUPPORTED,
+					"This tool requires full mode. Call close_file, then open_file with mode=full.");
 		}
 	}
 }

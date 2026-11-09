@@ -30,7 +30,7 @@ public final class CurrentProjectTool extends AbstractTool {
 
 	@Override
 	public String description() {
-		return "Return the primary input file loaded in the current jadx session and basic file metadata. "
+		return "Return the active mode, primary input file and basic file metadata. "
 				+ "Safe to call before `open_file`; in that state it returns `loaded=false`.";
 	}
 
@@ -44,6 +44,7 @@ public final class CurrentProjectTool extends AbstractTool {
 		JadxSession.ProjectSnapshot snapshot = session.projectSnapshot();
 		Map<String, Object> body = new LinkedHashMap<>();
 		body.put("loaded", snapshot.loaded);
+		body.put("mode", snapshot.mode);
 		if (!snapshot.loaded || snapshot.inputFile == null) {
 			return body;
 		}

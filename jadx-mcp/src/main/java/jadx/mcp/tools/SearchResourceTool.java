@@ -76,90 +76,95 @@ public final class SearchResourceTool extends AbstractTool {
 		SearchEngine engine = new SearchEngine(query, regex, ignoreCase);
 		long maxBytes = (long) maxSizeKb * 1024L;
 
-		return session.read(decompiler -> {
-			List<Map<String, Object>> hits = new ArrayList<>();
-			int seen = 0;
-			boolean hasMore = false;
-			boolean limitReached = false;
-			for (ResourceFile rf : decompiler.getResources()) {
-				if (rf.getType().getContentType() != ResourceContentType.CONTENT_TEXT) {
-					continue;
-				}
-				String path = rf.getDeobfName();
-				if (pathPrefix != null && !path.startsWith(pathPrefix)) {
-					continue;
-				}
-				if (globPattern != null && !globPattern.matcher(path).matches()) {
-					continue;
-				}
-				ResContainer container;
-				try {
-					container = rf.loadContent();
-				} catch (Throwable t) {
-					LOG.debug("Failed to load resource {}", path, t);
-					continue;
-				}
-				if (container == null) {
-					continue;
-				}
-				if (container.getDataType() != ResContainer.DataType.TEXT
-						&& container.getDataType() != ResContainer.DataType.RES_TABLE) {
-					continue;
-				}
-				ICodeInfo text = container.getText();
-				if (text == null) {
-					continue;
-				}
-				String code = text.getCodeStr();
-				if (code == null || code.isEmpty()) {
-					continue;
-				}
-				if ((long) code.length() > maxBytes) {
-					continue;
-				}
-				int pos = 0;
-				while (pos < code.length()) {
-					int found = engine.find(code, pos);
-					if (found < 0) {
-						break;
-					}
-					seen++;
-					if (seen > skip) {
-						int lineStart = CodeUtils.getLineStartForPos(code, found);
-						int lineEnd = CodeUtils.getLineEndForPos(code, found);
-						String snippet = code.substring(lineStart, lineEnd).trim();
-						int line = 1;
-						for (int i = 0; i < found; i++) {
-							if (code.charAt(i) == '\n') {
-								line++;
-							}
-						}
-						Map<String, Object> hit = new LinkedHashMap<>();
-						hit.put("resource_path", path);
-						hit.put("resource_type", rf.getType().name());
-						hit.put("line", line);
-						hit.put("snippet", snippet);
-						hits.add(hit);
-						if (hits.size() >= maxResults) {
-							int next = engine.find(code, lineEnd);
-							hasMore = next >= 0;
-							limitReached = true;
-							break;
-						}
-					}
-					pos = Math.max(found + 1, CodeUtils.getLineEndForPos(code, found) + 1);
-				}
-				if (limitReached) {
+		if (session.isFast()) {
+			return session.fastRead(project -> search(project.resources(), engine, pathPrefix,
+					globPattern, maxBytes, skip, maxResults));
+		}
+		return session.read(decompiler -> search(decompiler.getResources(), engine, pathPrefix,
+				globPattern, maxBytes, skip, maxResults));
+	}
+
+	private Object search(List<ResourceFile> resources, SearchEngine engine, String pathPrefix,
+			Pattern globPattern, long maxBytes, int skip, int maxResults) {
+		List<Map<String, Object>> hits = new ArrayList<>();
+		int seen = 0;
+		boolean hasMore = false;
+		boolean limitReached = false;
+		for (ResourceFile rf : resources) {
+			if (rf.getType().getContentType() != ResourceContentType.CONTENT_TEXT) {
+				continue;
+			}
+			String path = rf.getDeobfName();
+			if (pathPrefix != null && !path.startsWith(pathPrefix)) {
+				continue;
+			}
+			if (globPattern != null && !globPattern.matcher(path).matches()) {
+				continue;
+			}
+			ResContainer container;
+			try {
+				container = rf.loadContent();
+			} catch (Throwable t) {
+				LOG.debug("Failed to load resource {}", path, t);
+				continue;
+			}
+			if (container == null) {
+				continue;
+			}
+			if (container.getDataType() != ResContainer.DataType.TEXT
+					&& container.getDataType() != ResContainer.DataType.RES_TABLE) {
+				continue;
+			}
+			ICodeInfo text = container.getText();
+			if (text == null) {
+				continue;
+			}
+			String code = text.getCodeStr();
+			if (code == null || code.isEmpty() || (long) code.length() > maxBytes) {
+				continue;
+			}
+			int pos = 0;
+			while (pos < code.length()) {
+				int found = engine.find(code, pos);
+				if (found < 0) {
 					break;
 				}
+				seen++;
+				if (seen > skip) {
+					int lineStart = CodeUtils.getLineStartForPos(code, found);
+					int lineEnd = CodeUtils.getLineEndForPos(code, found);
+					String snippet = code.substring(lineStart, lineEnd).trim();
+					int line = 1;
+					for (int i = 0; i < found; i++) {
+						if (code.charAt(i) == '\n') {
+							line++;
+						}
+					}
+					Map<String, Object> hit = new LinkedHashMap<>();
+					hit.put("resource_path", path);
+					hit.put("resource_type", rf.getType().name());
+					hit.put("line", line);
+					hit.put("snippet", snippet);
+					hits.add(hit);
+					if (hits.size() >= maxResults) {
+						int next = engine.find(code, lineEnd);
+						hasMore = next >= 0;
+						limitReached = true;
+						break;
+					}
+				}
+				pos = Math.max(found + 1, CodeUtils.getLineEndForPos(code, found) + 1);
 			}
-			Map<String, Object> result = new LinkedHashMap<>();
-			result.put("hits", hits);
-			result.put("count", hits.size());
-			result.put("offset", skip);
-			result.put("next_offset", hasMore ? skip + hits.size() : -1);
-			return result;
-		});
+			if (limitReached) {
+				break;
+			}
+		}
+		Map<String, Object> result = new LinkedHashMap<>();
+		result.put("hits", hits);
+		result.put("count", hits.size());
+		result.put("offset", skip);
+		result.put("next_offset", hasMore ? skip + hits.size() : -1);
+		return result;
 	}
 
 	/** Translate a simple POSIX-style glob into a regex. Supports {@code *}, {@code ?}, and {@code **}. */

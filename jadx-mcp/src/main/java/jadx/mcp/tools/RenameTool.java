@@ -45,7 +45,7 @@ public final class RenameTool extends AbstractTool {
 
 	@Override
 	public String description() {
-		return "Rename a class, field, method, or variable in the active project and persist the change for "
+		return "In full mode, rename a class, field, method, or variable in the active project and persist the change for "
 				+ "`save_project`. `target` is a class FQN, `Class#field` (optionally `:JVMType`), or "
 				+ "`Class#method(args)return`. For variables, pass the containing method as `target` plus a "
 				+ "`variable_id` returned by `decompile_code(include_variables=true)`. Repeating the same target "

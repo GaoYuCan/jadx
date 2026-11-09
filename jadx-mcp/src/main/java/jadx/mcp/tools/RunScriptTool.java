@@ -5,7 +5,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
@@ -41,8 +43,9 @@ public final class RunScriptTool extends AbstractTool {
 	public String description() {
 		return "Execute a trusted Kotlin jadx script against the currently loaded project. "
 				+ "Provide exactly one of `script_path` or `script_text`. Top-level code and "
-				+ "`jadx.afterLoad {}` callbacks run immediately against the existing decompiler; the project "
-				+ "is not reopened. Registering decompile passes is unsupported. Scripts run as local JVM code "
+				+ "`jadx.afterLoad {}` callbacks run immediately. In fast mode, `class_fqns` is required and "
+				+ "only those classes are visible; use full mode for project-wide or resource scripts. "
+				+ "Registering decompile passes is unsupported. Scripts run as local JVM code "
 				+ "with the MCP server's filesystem and process permissions. Returns captured script logs, "
 				+ "diagnostics, duration, and success status.";
 	}
@@ -50,6 +53,7 @@ public final class RunScriptTool extends AbstractTool {
 	@Override
 	public JsonSchema schema() {
 		return SchemaBuilder.object()
+				.stringArray("class_fqns", "Required in fast mode: classes visible to the script's local JADX context.", false)
 				.string("script_path",
 						"Path to a `.jadx.kts` file. Mutually exclusive with `script_text`.", false)
 				.string("script_text",
@@ -59,6 +63,17 @@ public final class RunScriptTool extends AbstractTool {
 
 	@Override
 	protected Object call(Map<String, Object> args) {
+		if (session.isFast()) {
+			List<String> classFqns = optStringList(args, "class_fqns");
+			if (classFqns == null || classFqns.isEmpty()) {
+				throw ToolException.invalidArg("class_fqns", "required in fast mode");
+			}
+			return session.withFastScope(Set.copyOf(classFqns), () -> callLoaded(args));
+		}
+		return callLoaded(args);
+	}
+
+	private Object callLoaded(Map<String, Object> args) {
 		String scriptPathArg = optString(args, "script_path");
 		String scriptText = optString(args, "script_text");
 		if ((scriptPathArg == null) == (scriptText == null)) {

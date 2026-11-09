@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import jadx.api.CommentsLevel;
 import jadx.api.ICodeWriter;
 import jadx.api.metadata.annotations.InsnCodeOffset;
+import jadx.api.metadata.annotations.RawCodeRef;
 import jadx.api.metadata.annotations.VarNode;
 import jadx.api.plugins.input.data.MethodHandleType;
 import jadx.api.plugins.input.data.annotations.EncodedValue;
@@ -206,6 +207,8 @@ public class InsnGen {
 			code.attachAnnotation(fieldNode);
 		}
 		if (fieldNode == null) {
+			code.attachAnnotation(new RawCodeRef(RawCodeRef.Kind.FIELD,
+					field.getDeclClass().makeRawFullName(), field.getName(), TypeGen.signature(field.getType())));
 			code.add(field.getAlias());
 		} else {
 			code.add(fieldNode.getAlias());
@@ -251,6 +254,8 @@ public class InsnGen {
 			code.attachAnnotation(fieldNode);
 		}
 		if (fieldNode == null) {
+			code.attachAnnotation(new RawCodeRef(RawCodeRef.Kind.FIELD,
+					field.getDeclClass().makeRawFullName(), field.getName(), TypeGen.signature(field.getType())));
 			code.add(field.getAlias());
 		} else {
 			code.add(fieldNode.getAlias());
@@ -897,6 +902,10 @@ public class InsnGen {
 		}
 		if (callMthNode != null) {
 			code.attachAnnotation(callMthNode);
+		} else {
+			code.attachAnnotation(new RawCodeRef(RawCodeRef.Kind.METHOD,
+					callMth.getDeclClass().makeRawFullName(), callMth.getName(),
+					callMth.getShortId().substring(callMth.getShortId().indexOf('('))));
 		}
 		if (insn.contains(AFlag.FORCE_RAW_NAME)) {
 			code.add(callMth.getName());

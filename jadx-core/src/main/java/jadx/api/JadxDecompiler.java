@@ -631,6 +631,7 @@ public final class JadxDecompiler implements Closeable {
 			case VAR_REF:
 				return resolveVarRef(codeInfo, (VarRef) ann);
 			case OFFSET:
+			case RAW_REF:
 				// offset annotation don't have java node object
 				return null;
 			default:

@@ -21,6 +21,7 @@ import jadx.api.ICodeWriter;
 import jadx.api.JadxArgs;
 import jadx.api.args.IntegerFormat;
 import jadx.api.metadata.annotations.NodeEnd;
+import jadx.api.metadata.annotations.RawCodeRef;
 import jadx.api.plugins.input.data.AccessFlags;
 import jadx.api.plugins.input.data.annotations.EncodedType;
 import jadx.api.plugins.input.data.annotations.EncodedValue;
@@ -617,6 +618,9 @@ public class ClassGen {
 		ClassNode classNode = cls.root().resolveClass(classInfo);
 		if (classNode != null) {
 			code.attachAnnotation(classNode);
+		} else {
+			code.attachAnnotation(new RawCodeRef(RawCodeRef.Kind.CLASS,
+					classInfo.makeRawFullName(), null, null));
 		}
 		code.add(classInfo.getAliasShortName());
 		addGenerics(code, type);
@@ -652,6 +656,8 @@ public class ClassGen {
 		if (classNode != null) {
 			useClass(code, classNode);
 		} else {
+			code.attachAnnotation(new RawCodeRef(RawCodeRef.Kind.CLASS,
+					classInfo.makeRawFullName(), null, null));
 			addClsName(code, classInfo);
 		}
 	}

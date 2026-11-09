@@ -35,7 +35,7 @@ class ProjectToolsTest {
 	void currentProjectReportsUnloadedState() {
 		Map<String, Object> result = call(new CurrentProjectTool(session), Map.of());
 
-		assertThat(result).containsOnly(Map.entry("loaded", false));
+		assertThat(result).containsOnly(Map.entry("loaded", false), Map.entry("mode", "none"));
 	}
 
 	@Test
@@ -58,6 +58,27 @@ class ProjectToolsTest {
 				.containsEntry("loaded", true)
 				.containsEntry("exists", false)
 				.doesNotContainKeys("size_bytes", "last_modified");
+	}
+
+	@Test
+	void openFileReturnsImmediatelyWhenInputIsAlreadyLoaded() throws Exception {
+		Path input = copyFixtureClass();
+		load(input);
+		Object decompiler = session.read(current -> current);
+		Path equivalentPath = input.getParent().resolve(".").resolve(input.getFileName());
+
+		Map<String, Object> result = call(new OpenFileTool(session), Map.of(
+				"path", equivalentPath.toString(),
+				"skip_resources", false,
+				"threads_count", 8));
+
+		assertThat(result)
+				.containsEntry("loaded", true)
+				.containsEntry("already_loaded", true)
+				.containsEntry("input_file", equivalentPath.toFile().getAbsolutePath())
+				.containsEntry("message", "项目已经加载。如果确定当前加载配置不适用于你的任务，请先调用 close_file，再重新调用 open_file。");
+		Object currentDecompiler = session.read(current -> current);
+		assertThat(currentDecompiler).isSameAs(decompiler);
 	}
 
 	@Test

@@ -12,6 +12,7 @@ import jadx.api.JavaField;
 import jadx.api.JavaMethod;
 import jadx.api.JavaNode;
 import jadx.api.metadata.ICodeAnnotation;
+import jadx.api.metadata.annotations.RawCodeRef;
 
 /**
  * Scans {@link ICodeInfo#getCodeMetadata()} once and produces a {@link RefTable} with stable {@code ref_id}s.
@@ -56,18 +57,23 @@ public final class RefTableBuilder {
 			if (!isKept(ann)) {
 				continue;
 			}
-			JavaNode node = decompiler.getJavaNodeByCodeAnnotation(codeInfo, ann);
-			if (node == null) {
+			RawCodeRef raw = ann instanceof RawCodeRef ? (RawCodeRef) ann : null;
+			JavaNode node = raw == null ? decompiler.getJavaNodeByCodeAnnotation(codeInfo, ann) : null;
+			if (raw == null && node == null) {
 				continue;
 			}
-			RefEntry.Kind kind = kindOf(node);
+			RefEntry.Kind kind = raw == null ? kindOf(node) : RefEntry.Kind.valueOf(raw.getKind().name());
 			if (kind == null) {
 				continue;
 			}
 			String targetFqn;
 			String targetMember = null;
 			String targetDescriptor = null;
-			if (node instanceof JavaClass jc) {
+			if (raw != null) {
+				targetFqn = raw.getOwner();
+				targetMember = raw.getMember();
+				targetDescriptor = raw.getDescriptor();
+			} else if (node instanceof JavaClass jc) {
 				targetFqn = jc.getFullName();
 			} else if (node instanceof JavaMethod jm) {
 				targetFqn = jm.getDeclaringClass().getFullName();
@@ -100,6 +106,7 @@ public final class RefTableBuilder {
 			case CLASS:
 			case METHOD:
 			case FIELD:
+			case RAW_REF:
 				return true;
 			default:
 				return false;

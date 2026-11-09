@@ -19,11 +19,11 @@ MCP runner 不支持注册反编译 pass，也不支持脚本修改 rename、rep
 
 ## 工作流程
 
-1. 调用 `current_project`，确认加载的是目标输入。
+1. 调用 `current_project`，确认加载的是目标输入及模式。快速模式下脚本必须提供 `class_fqns`；全项目或资源脚本先用 `mode=full` 加载。
 2. 用普通 jadx-mcp 工具查看少量代表性类、方法、smali 或资源，确定要使用的分析层。
 3. 十几行的 API 探针使用 `script_text`；需要配置、复用或输出文件的脚本使用 `.jadx.kts` 文件和 `script_path`。
 4. 数据类和 helper 放在顶层；项目遍历放在 `jadx.afterLoad {}`。
-5. 调用 `run_script`，`script_text` 和 `script_path` 严格二选一。
+5. 调用 `run_script`，`script_text` 和 `script_path` 严格二选一；快速模式同时传入要分析的原始类名列表 `class_fqns`。
 6. 检查 `success`、`after_load_callbacks`、`logs` 和 `error`。
 7. 大结果写成确定性 JSON/JSONL，日志只输出路径、计数和失败摘要。
 8. 用已知样例和至少一个反编译失败或有歧义的样例验证结果。
