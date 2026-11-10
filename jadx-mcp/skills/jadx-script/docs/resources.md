@@ -13,7 +13,7 @@
 
 ## 适用范围
 
-本模块用于 APK、AAB、APKM、XAPK 等 Android 输入中的资源分析，包括：
+MCP 中用 `list_resources`、`decompile_xml` 和 `search_resource` 查询资源。本文的脚本 API 用于通过 JADX CLI 分析 Android 资源，包括：
 
 - `AndroidManifest.xml`；
 - `resources.arsc` 或 `resources.pb`；
@@ -26,14 +26,7 @@
 
 ## 确认资源已加载
 
-`open_file` 的 `skip_resources=true` 会跳过资源。脚本无法在运行时补回已经跳过的资源；需要重新调用 `open_file`，并设置：
-
-```json
-{
-  "path": "/absolute/path/app.apk",
-  "skip_resources": false
-}
-```
+CLI 运行资源脚本时需要加载资源。参见 [使用 JADX CLI 测试](getting-started.md#使用-jadx-cli-测试)。
 
 脚本中先检查当前设置和资源数量：
 

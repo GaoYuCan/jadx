@@ -1,10 +1,12 @@
-package jadx.mcp.fast;
+package jadx.mcp.dex;
 
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -16,9 +18,6 @@ import jadx.api.JadxArgs;
 import jadx.api.JadxDecompiler;
 import jadx.api.ResourceFile;
 import jadx.api.ResourceType;
-import jadx.api.data.ICodeRename;
-import jadx.api.data.IJavaNodeRef;
-import jadx.api.data.impl.JadxCodeData;
 import jadx.api.impl.AnnotatedCodeWriter;
 import jadx.api.plugins.input.ICodeLoader;
 import jadx.api.plugins.input.data.IClassData;
@@ -28,51 +27,55 @@ import jadx.mcp.util.ToolException;
 import jadx.plugins.input.dex.DexFileLoader;
 import jadx.plugins.input.dex.DexInputOptions;
 import jadx.plugins.input.dex.DexReader;
+import jadx.plugins.input.dex.sections.DexConsts;
 import jadx.plugins.tools.JadxExternalPluginsLoader;
 import jadx.zip.IZipEntry;
 import jadx.zip.ZipContent;
 import jadx.zip.ZipReader;
 
 /** A project-wide class directory backed by original DEX buffers, without loading ClassNodes. */
-public final class FastProject implements Closeable {
-	private final List<DexReader> readers = new ArrayList<>();
+public final class DexProject implements Closeable {
 	private final Map<String, ClassEntry> classes = new LinkedHashMap<>();
-	private final Map<String, String> classAliases = new LinkedHashMap<>();
-	private final Map<String, String> rawByAlias = new LinkedHashMap<>();
-	private final Map<String, String> memberAliases = new LinkedHashMap<>();
-	private final List<File> inputs;
-	private final JadxCodeData codeData;
+	private final File input;
+	private final boolean apk;
 	private final ZipReader zipReader = new ZipReader();
 	private final List<ResourceEntry> resourceEntries = new ArrayList<>();
 	private JadxDecompiler resourceDecompiler;
 	private List<ResourceFile> resourceFiles;
 
-	public FastProject(List<File> inputs, JadxCodeData codeData) throws IOException {
-		this.inputs = List.copyOf(inputs);
-		this.codeData = codeData;
+	public DexProject(File input) throws IOException {
+		this.input = input;
+		byte[] magic;
+		try (InputStream stream = Files.newInputStream(input.toPath())) {
+			magic = stream.readNBytes(DexConsts.MAX_MAGIC_SIZE);
+		}
+		apk = Arrays.equals(magic, DexConsts.ZIP_FILE_MAGIC);
 		DexFileLoader loader = new DexFileLoader(new DexInputOptions());
-		for (File file : inputs) {
-			String lower = file.getName().toLowerCase(java.util.Locale.ROOT);
-			if (lower.endsWith(".dex")) {
-				readers.addAll(loader.loadDexReaders(file.getAbsolutePath(), Files.readAllBytes(file.toPath())));
-				resourceEntries.add(new ResourceEntry(file.getAbsolutePath(), ResourceType.CODE,
-						file.length(), file.length(), null));
-			} else if (lower.endsWith(".apk")) {
-				try (ZipContent zip = zipReader.open(file)) {
-					for (IZipEntry entry : zip.getEntries()) {
-						if (!entry.isDirectory()) {
-							resourceEntries.add(new ResourceEntry(entry.getName(),
-									ResourceType.getFileType(entry.getName()), entry.getUncompressedSize(),
-									entry.getCompressedSize(), entry.getName()));
-						}
-						if (isRuntimeDex(entry.getName())) {
-							readers.addAll(loader.loadDexReaders(file.getName() + ':' + entry.getName(), entry.getBytes()));
-						}
+		List<DexReader> readers = new ArrayList<>();
+		if (Arrays.equals(magic, DexConsts.DEX_FILE_MAGIC)) {
+			readers.addAll(loader.loadDexReaders(input.getAbsolutePath(), Files.readAllBytes(input.toPath())));
+			resourceEntries.add(new ResourceEntry(input.getAbsolutePath(), ResourceType.CODE,
+					input.length(), -1));
+		} else if (apk) {
+			try (ZipContent zip = zipReader.open(input)) {
+				IZipEntry manifest = zip.searchEntry("AndroidManifest.xml");
+				if (manifest == null || manifest.isDirectory()) {
+					throw new ToolException(ToolException.Code.UNSUPPORTED, "APK is missing AndroidManifest.xml: " + input);
+				}
+				for (IZipEntry entry : zip.getEntries()) {
+					if (entry.isDirectory()) {
+						continue;
+					}
+					resourceEntries.add(new ResourceEntry(entry.getName(),
+							ResourceType.getFileType(entry.getName()), entry.getUncompressedSize(),
+							entry.getCompressedSize()));
+					if (isRuntimeDex(entry.getName())) {
+						readers.addAll(loader.loadDexReaders(input.getName() + ':' + entry.getName(), entry.getBytes()));
 					}
 				}
-			} else {
-				throw new IOException("Fast mode accepts only APK and DEX: " + file);
 			}
+		} else {
+			throw new ToolException(ToolException.Code.UNSUPPORTED, "Expected an APK or DEX input: " + input);
 		}
 		for (DexReader reader : readers) {
 			reader.visitClasses(data -> {
@@ -80,41 +83,9 @@ public final class FastProject implements Closeable {
 				// DexReader reuses its class-data cursor; copy captures this definition's offset.
 				classes.putIfAbsent(fqn, new ClassEntry(reader, data.copy().getInputFileOffset(), fqn,
 						data.getAccessFlags(), dotName(data.getSuperType()),
-						data.getInterfacesTypes().stream().map(FastProject::dotName).toList()));
+						data.getInterfacesTypes().stream().map(DexProject::dotName).toList()));
 			});
 		}
-		for (ICodeRename rename : codeData.getRenames()) {
-			if (rename.getCodeRef() != null) {
-				continue;
-			}
-			IJavaNodeRef ref = rename.getNodeRef();
-			String rawClass = ref.getDeclaringClass();
-			if (!classes.containsKey(rawClass)) {
-				continue;
-			}
-			if (ref.getType() == IJavaNodeRef.RefType.CLASS) {
-				String alias = classAlias(rawClass, rename.getNewName());
-				classAliases.put(rawClass, alias);
-				rawByAlias.putIfAbsent(alias, rawClass);
-			} else if (ref.getType() == IJavaNodeRef.RefType.FIELD
-					|| ref.getType() == IJavaNodeRef.RefType.METHOD) {
-				memberAliases.put(rawClass + '#' + ref.getShortId(), rename.getNewName());
-			}
-		}
-	}
-
-	private static String classAlias(String rawClass, String name) {
-		if (name.startsWith(".")) {
-			return name.substring(1);
-		}
-		if (name.contains(".")) {
-			return name;
-		}
-		int dot = rawClass.lastIndexOf('.');
-		String simple = rawClass.substring(dot + 1);
-		int inner = simple.lastIndexOf('$');
-		String prefix = inner < 0 ? "" : simple.substring(0, inner + 1);
-		return (dot < 0 ? "" : rawClass.substring(0, dot + 1)) + prefix + name;
 	}
 
 	private static boolean isRuntimeDex(String name) {
@@ -164,8 +135,10 @@ public final class FastProject implements Closeable {
 		try {
 			local.load();
 			List<ResourceFile> files = new ArrayList<>();
-			for (File input : inputs) {
+			if (apk) {
 				local.getResourcesLoader().defaultLoadFile(files, input, "");
+			} else {
+				files.add(ResourceFile.createResourceFile(local, input, ResourceType.CODE));
 			}
 			local.getRoot().loadResources(local.getResourcesLoader(), files);
 			resourceDecompiler = local;
@@ -178,35 +151,11 @@ public final class FastProject implements Closeable {
 	}
 
 	public ClassEntry find(String fqn) {
-		ClassEntry entry = classes.get(rawByAlias.getOrDefault(fqn, fqn));
+		ClassEntry entry = classes.get(fqn);
 		if (entry == null) {
 			throw ToolException.notFound("class", fqn);
 		}
 		return entry;
-	}
-
-	public String displayClassFqn(String rawFqn) {
-		return classAliases.getOrDefault(rawFqn, rawFqn);
-	}
-
-	public String displayMemberName(String rawClass, String shortId, String rawName) {
-		return memberAliases.getOrDefault(rawClass + '#' + shortId, rawName);
-	}
-
-	public String rawMemberName(String rawClass, String alias, String descriptor, boolean method) {
-		String prefix = rawClass + '#';
-		for (Map.Entry<String, String> entry : memberAliases.entrySet()) {
-			String shortId = entry.getKey();
-			if (!shortId.startsWith(prefix) || !entry.getValue().equals(alias)) {
-				continue;
-			}
-			shortId = shortId.substring(prefix.length());
-			int separator = shortId.indexOf(method ? '(' : ':');
-			if (separator >= 0 && (descriptor == null || shortId.substring(separator).equals(descriptor))) {
-				return shortId.substring(0, separator);
-			}
-		}
-		return alias;
 	}
 
 	public JadxDecompiler decompiler(Set<String> classNames) {
@@ -217,7 +166,6 @@ public final class FastProject implements Closeable {
 		args.setSkipResources(true);
 		args.setPluginLoader(new JadxExternalPluginsLoader());
 		args.setFilesGetter(JadxMcpFilesGetter.INSTANCE);
-		args.setCodeData(codeData);
 		args.setCodeWriterProvider(AnnotatedCodeWriter::new);
 		args.setDeobfuscationOn(false);
 		args.setUseSourceNameAsClassNameAlias(jadx.api.args.UseSourceNameAsClassNameAlias.NEVER);
@@ -263,15 +211,10 @@ public final class FastProject implements Closeable {
 			resourceFiles = null;
 		}
 		classes.clear();
-		classAliases.clear();
-		rawByAlias.clear();
-		memberAliases.clear();
-		readers.clear();
 		resourceEntries.clear();
 	}
 
-	public record ResourceEntry(String name, ResourceType type, long sizeBytes, long compressedBytes,
-			String zipEntryName) {
+	public record ResourceEntry(String name, ResourceType type, long sizeBytes, long compressedBytes) {
 	}
 
 	public record ClassEntry(DexReader reader, int offset, String fqn, int access,

@@ -1,6 +1,6 @@
 ---
 name: jadx-script
-description: 为 jadx-mcp 当前加载的项目编写并运行 Kotlin `.jadx.kts` 分析脚本。适用于全项目或重复性逆向分析、提取类和资源的结构化数据、扫描原始字节码或 JADX IR、读取源码元数据、导出可复现结果，以及用一次确定性分析替代大量零散 MCP 查询。
+description: 为 jadx-mcp 当前加载的项目编写并运行 Kotlin `.jadx.kts` 分析脚本。适用于指定类的重复性逆向分析、提取类和成员的结构化数据、扫描原始字节码或 JADX IR、读取源码元数据、导出可复现结果，以及用一次确定性分析替代大量零散 MCP 查询。
 ---
 
 # JADX 脚本
@@ -13,17 +13,17 @@ MCP runner 支持：
 - `getJadxInstance()`；
 - `jadx.afterLoad {}`；
 - 路径脚本和文本脚本；
-- 类、方法、字段、原始指令、已有 IR、源码元数据和资源分析。
+- 类、方法、字段、原始指令、已有 IR 和源码元数据。
 
 MCP runner 不支持注册反编译 pass，也不支持脚本修改 rename、replace、GUI 或插件选项。
 
 ## 工作流程
 
-1. 调用 `current_project`，确认加载的是目标输入及模式。快速模式下脚本必须提供 `class_fqns`；全项目或资源脚本先用 `mode=full` 加载。
+1. 调用 `current_project`，确认加载的是目标 APK 或 DEX。用 `list_classes`、`search_symbol` 等工具确定脚本需要的类。
 2. 用普通 jadx-mcp 工具查看少量代表性类、方法、smali 或资源，确定要使用的分析层。
 3. 十几行的 API 探针使用 `script_text`；需要配置、复用或输出文件的脚本使用 `.jadx.kts` 文件和 `script_path`。
 4. 数据类和 helper 放在顶层；项目遍历放在 `jadx.afterLoad {}`。
-5. 调用 `run_script`，`script_text` 和 `script_path` 严格二选一；快速模式同时传入要分析的原始类名列表 `class_fqns`。
+5. 调用 `run_script`，`script_text` 和 `script_path` 严格二选一；同时传入要分析的原始类名列表 `class_fqns`。
 6. 检查 `success`、`after_load_callbacks`、`logs` 和 `error`。
 7. 大结果写成确定性 JSON/JSONL，日志只输出路径、计数和失败摘要。
 8. 用已知样例和至少一个反编译失败或有歧义的样例验证结果。
@@ -38,7 +38,7 @@ MCP runner 不支持注册反编译 pass，也不支持脚本修改 rename、rep
 | `JadxDecompiler`、类、方法、字段、变量、包和符号解析 API | [docs/api-reference.md](docs/api-reference.md) |
 | 原始字节码、处理后 IR、CFG、SSA 和指令节点 API | [docs/bytecode-ir-api.md](docs/bytecode-ir-api.md) |
 | 反编译源码、位置映射、节点注解、变量元数据和证据定位 | [docs/source-metadata.md](docs/source-metadata.md) |
-| AndroidManifest、资源表、XML、assets 和二进制资源 | [docs/resources.md](docs/resources.md) |
+| 通过 JADX CLI 编写资源脚本 | [docs/resources.md](docs/resources.md) |
 
 阅读原则：
 
@@ -46,7 +46,7 @@ MCP runner 不支持注册反编译 pass，也不支持脚本修改 rename、rep
 - 只做公开 API 遍历时再读 `api-reference.md`；
 - 需要寄存器、偏移、控制流或 SSA 时读 `bytecode-ir-api.md`；
 - 需要把源码片段精确映射回节点时读 `source-metadata.md`；
-- 输入是 APK/AAB 且需要非代码信息时读 `resources.md`；
+- MCP 的资源查询用 `list_resources`、`decompile_xml` 和 `search_resource`；
 - 使用 `jadx.core` 内部 API 时，先用当前安装版本运行最小探针确认签名。
 
 ## 最小模板
@@ -89,7 +89,7 @@ jadx.afterLoad {
 
 | 任务 | 首选 API |
 | --- | --- |
-| 当前输入和选项 | `jadx.args` |
+| 当前 APK/DEX | MCP `current_project` |
 | 顶层类 | `jadx.classes` |
 | 类名和成员 | `JavaClass.rawName`、`fullName`、`fields`、`methods` |
 | 完整类源码 | `JavaClass.codeInfo.codeStr` |
@@ -100,7 +100,6 @@ jadx.afterLoad {
 | 原始字节码 | `MethodNode.codeReader`、`InsnData` |
 | 处理后 IR | `MethodNode.basicBlocks`、`region`、`sVars`；早期阶段才使用 `instructions` |
 | 源码注解和行映射 | `JavaClass.codeInfo.codeMetadata` |
-| Android 资源 | `jadx.internalDecompiler.resources` |
 | 日志 | `log.info {}`、`log.warn {}`、`log.error {}` |
 
 Kotlin 属性会映射 Java getter。例如 `cls.methods` 调用 `getMethods()`。
@@ -221,7 +220,7 @@ require(config.isFile) {
 - 大结果写入 JSON/JSONL；
 - 日志包含输出路径、扫描计数、记录数、失败数和完整状态；
 - 结果包含输入文件、有效配置、schema 版本和脚本版本；
-- 为反编译失败、资源失败和达到分析上限分别保留明确状态；
+- 为反编译失败和达到分析上限分别保留明确状态；
 - 最终通过 jadx-mcp `run_script` 真实运行一次，而不只做静态检查。
 
 ## 快速排错
@@ -232,6 +231,6 @@ require(config.isFile) {
 - 回调未运行：确认项目已加载，并把遍历放进 `jadx.afterLoad {}`。
 - 找不到方法：输出 `methodInfo.shortId` 或 `rawFullId` 后再匹配。
 - Java 反编译异常：检查 `MethodNode.codeReader` 和 `JavaClass.smali`。
-- 资源为空：确认 `open_file` 没有设置 `skip_resources=true`。
+- 需要分析资源：用资源 MCP 工具，或用 JADX CLI 执行资源脚本。
 - 输出过大：改写 JSONL，只在日志返回摘要。
 - 需要自定义 decompile pass：当前 runner 不支持；改用加载后 API、原始指令或已有 IR 完成分析。

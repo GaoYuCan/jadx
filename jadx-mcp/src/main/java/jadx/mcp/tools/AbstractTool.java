@@ -1,7 +1,6 @@
 package jadx.mcp.tools;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,17 +50,19 @@ public abstract class AbstractTool {
 	protected abstract Object call(Map<String, Object> args) throws Exception;
 
 	public final SyncToolSpecification spec() {
+		JsonSchema inputSchema = schema();
 		Tool tool = Tool.builder()
 				.name(name())
 				.description(description())
-				.inputSchema(schema())
+				.inputSchema(inputSchema)
 				.build();
-		return new SyncToolSpecification(tool, (exchange, request) -> handle(request));
+		return new SyncToolSpecification(tool, (exchange, request) -> handle(request, inputSchema.properties()));
 	}
 
-	private CallToolResult handle(CallToolRequest request) {
+	private CallToolResult handle(CallToolRequest request, Map<String, Object> properties) {
 		Map<String, Object> args = request.arguments() != null ? request.arguments() : Map.of();
 		try {
+			validateArgumentNames(args, properties, "");
 			Object result = call(args);
 			String text = JsonUtil.toPrettyJson(result);
 			return ToolOutputManager.success(name(), text);
@@ -70,6 +71,21 @@ public abstract class AbstractTool {
 		} catch (Throwable t) {
 			LOG.error("Tool '{}' failed", name(), t);
 			return errorResult("INTERNAL", t.getClass().getSimpleName() + ": " + t.getMessage(), null);
+		}
+	}
+
+	private static void validateArgumentNames(Map<?, ?> args, Map<?, ?> properties, String prefix) {
+		for (Map.Entry<?, ?> arg : args.entrySet()) {
+			String name = prefix + arg.getKey();
+			Object schema = properties.get(arg.getKey());
+			if (schema == null) {
+				throw ToolException.invalidArg(name, "unknown parameter");
+			}
+			if (arg.getValue() instanceof Map<?, ?> nested
+					&& schema instanceof Map<?, ?> fragment
+					&& fragment.get("properties") instanceof Map<?, ?> nestedProperties) {
+				validateArgumentNames(nested, nestedProperties, name + ".");
+			}
 		}
 	}
 
@@ -122,13 +138,9 @@ public abstract class AbstractTool {
 			return fallback;
 		}
 		if (v instanceof Number n) {
-			return n.intValue();
-		}
-		if (v instanceof String s) {
-			try {
-				return Integer.parseInt(s);
-			} catch (NumberFormatException nfe) {
-				throw ToolException.invalidArg(name, "must be an integer, got '" + s + "'");
+			int value = n.intValue();
+			if (value == n.doubleValue()) {
+				return value;
 			}
 		}
 		throw ToolException.invalidArg(name, "must be an integer");
@@ -141,9 +153,6 @@ public abstract class AbstractTool {
 		}
 		if (v instanceof Boolean b) {
 			return b;
-		}
-		if (v instanceof String s) {
-			return Boolean.parseBoolean(s);
 		}
 		throw ToolException.invalidArg(name, "must be a boolean");
 	}
@@ -162,10 +171,6 @@ public abstract class AbstractTool {
 				out.add(s);
 			}
 			return out;
-		}
-		if (v instanceof String s) {
-			// Lenient: accept comma-separated as a fallback so LLMs that "stringify" the array still work
-			return Arrays.asList(s.split("\\s*,\\s*"));
 		}
 		throw ToolException.invalidArg(name, "must be an array of strings");
 	}

@@ -1,11 +1,11 @@
 # jadx-mcp
 
-`jadx-mcp` 是基于 jadx 的 MCP 工具，它把包结构浏览、类成员查询、符号搜索、字符串搜索、反编译、反汇编、交叉引用、继承关系和资源解码封装成可调用工具，供模型按需读取分析结果。
+`jadx-mcp` 是基于 jadx 的 MCP 工具，它把包结构浏览、类成员查询、符号搜索、字符串搜索、反编译、反汇编、交叉引用和资源解码封装成可调用工具，供模型按需读取分析结果。
 
 ## 适合做什么
 
-- **逆向分析**：快速梳理 APK / DEX / JAR 的包结构、类关系、调用关系和关键字符串，按需反编译目标类或方法，适合分析业务逻辑、协议实现、加固壳外层逻辑和第三方 SDK 行为。
-- **Android 应用漏洞挖掘**：定位 WebView JS Bridge、导出组件、硬编码密钥、敏感接口、加密/签名逻辑、IPC 调用链等风险点，并通过交叉引用和继承关系追踪真实可达路径。
+- **逆向分析**：快速梳理 APK / DEX 的包结构、类关系、调用关系和关键字符串，按需反编译目标类或方法，适合分析业务逻辑、协议实现、加固壳外层逻辑和第三方 SDK 行为。
+- **Android 应用漏洞挖掘**：定位 WebView JS Bridge、导出组件、硬编码密钥、敏感接口、加密/签名逻辑、IPC 调用链等风险点，并通过字节码交叉引用定位调用方。
 
 ## 构建
 
@@ -34,23 +34,6 @@ jadx-mcp/build/libs/jadx-mcp-dev-all.jar
   }
 }
 ```
-
-如果需要解析 Android framework 或其他 SDK stub，在配置里加入 `JADX_MCP_AUX_INPUTS`：
-
-```json
-{
-  "mcpServers": {
-    "jadx": {
-      "command": "/abs/path/to/jadx/jadx-mcp/bin/jadx-mcp.sh",
-      "env": {
-        "JADX_MCP_AUX_INPUTS": "/abs/android-35.jar:/abs/other-sdk-stubs.jar"
-      }
-    }
-  }
-}
-```
-
-路径分隔符与 `$CLASSPATH` 一致：macOS / Linux 使用 `:`，Windows 使用 `;`。
 
 ## Streamable HTTP
 
@@ -121,11 +104,10 @@ jadx-mcp/bin/jadx-mcp.sh \
 
 | 工具 | 用途 |
 | --- | --- |
-| `open_file` | 加载或替换当前项目。支持 `.apk`、`.dex`、`.jar`、`.class`、`.smali`、`.zip`、`.aar`、`.arsc`、`.aab`、`.xapk`、`.apkm`、`.jadx`。`mode=auto` 默认让 APK/DEX 使用快速模式，其余使用完整模式；也可显式指定 `fast` 或 `full`。当前文件已经加载时直接返回；切换模式或参数须先调用 `close_file`。 |
+| `open_file` | 按文件内容打开 APK 或 DEX。传入 `path` 即可；同一文件已加载时直接返回。 |
 | `close_file` | 关闭当前项目并释放缓存。重复调用也是安全的。 |
-| `current_project` | 返回当前是否已加载项目、实际模式，以及主输入文件的绝对路径、文件名、扩展名、大小和最后修改时间。 |
-| `save_project` | 把主输入文件和 MCP 中产生的 rename 记录保存为 jadx GUI 可打开的 v2 `.jadx` 项目文件。 |
-| `run_script` | 使用脚本路径或内联脚本文本执行 `.jadx.kts`。快速模式必须提供 `class_fqns`，脚本只能看到指定类；全项目脚本使用完整模式。 |
+| `current_project` | 返回当前是否已加载项目，以及输入文件的绝对路径、文件名、扩展名、大小和最后修改时间。 |
+| `run_script` | 使用脚本路径或内联脚本文本执行 `.jadx.kts`。用 `class_fqns` 指定脚本可访问的类。 |
 
 ### 浏览与导航
 
@@ -139,10 +121,10 @@ jadx-mcp/bin/jadx-mcp.sh \
 
 | 工具 | 用途 |
 | --- | --- |
-| `decompile_code` | 反编译一个类或一个方法为 Java 源码。默认返回带行号的源码和旁路 `refs` 数组；`refs` 中的 `ref_id` 可交给 `resolve_ref`。设置 `include_variables=true` 会额外返回可用于 rename 的变量句柄。 |
+| `decompile_code` | 反编译一个类或一个方法为 Java 源码。默认返回带行号的源码和旁路 `refs` 数组；`refs` 中的 `ref_id` 可交给 `resolve_ref`。设置 `include_variables=true` 会额外返回变量元数据。 |
 | `disassemble` | 反汇编一个类或一个方法为 smali。 |
 | `decompile_xml` | 按资源路径解码 Android XML 或文本资源。 |
-| `resolve_ref` | 把 `decompile_code` 返回的 `(class_fqn, ref_id)` 解析为具体的类、方法或字段。 |
+| `resolve_ref` | 把 `decompile_code` 返回的 `(class_fqn, ref_id)` 解析为具体的类、方法或字段。查找引用方用 `xrefs_to`。 |
 
 `decompile_code` 的 `annotate` 参数：
 
@@ -153,7 +135,7 @@ jadx-mcp/bin/jadx-mcp.sh \
 | `both` | 同时返回 `refs[]` 和内联标记。 |
 | `off` | 只返回源码。 |
 
-行号坐标在 `decompile_code`、`search_code`、`xrefs_to` 和 `resolve_ref` 之间保持一致。行号槽和内联注解不会改变这个坐标系。
+`decompile_code` 与 `resolve_ref` 使用同一套 Java 源码坐标。`search_code` 返回 Smali 行号，`xrefs_to` 返回字节码偏移。
 
 ### 搜索与分析
 
@@ -161,18 +143,13 @@ jadx-mcp/bin/jadx-mcp.sh \
 | --- | --- |
 | `search_symbol` | 按符号表搜索类、方法、字段。支持名称、正则、大小写、包前缀、注解、父类、接口、访问标志等过滤；不反编译。 |
 | `search_strings` | 在 dex 字符串常量、final 字段 encoded values、注解参数中搜索字符串；不反编译。 |
-| `search_code` | 搜索 Java 或 smali 全文；快速模式只支持 smali，全局 Java 搜索需要完整模式。 |
+| `search_code` | 按 `query` 全文搜索 Smali。 |
 | `search_resource` | 在解码后的文本资源中搜索，支持正则、忽略大小写、路径前缀和 glob。 |
-| `xrefs_to` | 查询类、方法、字段的交叉引用。字段引用会区分 `read`、`write`、`init`。 |
-| `method_overrides` | 从一个方法向下查找子类或子接口中的重写，相当于 GUI 里的 Define Plus。 |
-| `inheritance_tree` | 查询类型层级。`up` 返回父类链和接口；`down` 返回子类或接口实现者；`transitive=true` 返回完整闭包。 |
-| `rename` | 对类、字段、方法或变量添加或更新用户重命名。 |
-
-快速模式按需反编译目标类，跨 DEX 引用返回调用方与字节码偏移；资源目录仅列元数据，请求 XML 时再解码。`rename`、`method_overrides`、`inheritance_tree` 和全局 Java 搜索需要 `mode=full`。快速模式不加载 `JADX_MCP_AUX_INPUTS`；`save_project` 和 `current_project` 在两种模式下均可使用。
+| `xrefs_to` | 查询 DEX 指令中对类、方法和字段的引用。外部方法和重载方法的签名写在 `target_fqn` 中，如 `java.io.PrintStream#println(Ljava/lang/String;)V`。 |
 
 ## 字节码优先的默认设置
 
-MCP 模式下，jadx-mcp 会关闭一组“让源码更好看但会改写符号结构”的 jadx 选项。目标是让工具输出尽量贴近 dex 中真实存在的类、方法和字段，避免后续 `xrefs_to`、`method_overrides`、`inheritance_tree` 或 `search_symbol` 查不到模型刚刚看到的符号。
+jadx-mcp 会关闭一组“让源码更好看但会改写符号结构”的 jadx 选项。目标是让工具输出尽量贴近 dex 中真实存在的类、方法和字段，避免后续 `xrefs_to` 或 `search_symbol` 查不到模型刚刚看到的符号。
 
 命名相关：
 
@@ -188,7 +165,7 @@ MCP 模式下，jadx-mcp 会关闭一组“让源码更好看但会改写符号�
 | --- | --- |
 | `moveInnerClasses=false` | 保留 `Outer$Inner` 形式，方便与 smali 和 xref 对齐。 |
 | `inlineMethods=false` | 被内联的方法会失去声明位点。 |
-| `inlineAnonymousClasses=false` | 匿名类不被折进外层方法，类型图和符号搜索仍能看到它。 |
+| `inlineAnonymousClasses=false` | 匿名类不被折进外层方法，保留单独的类定义。 |
 | `replaceConsts=false` | 保留 `R.id.foo` 这类字段读取，不把它折成字面值。 |
 
 Kotlin metadata / source debug extension 插件仍可恢复 Kotlin 源码名，因为这些名字来自 APK 中的编译器元数据，不是猜测。

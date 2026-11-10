@@ -9,13 +9,11 @@ import java.util.regex.Pattern;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
-import jadx.api.ResourceFile;
 import jadx.api.ResourceType;
 import jadx.mcp.JadxSession;
-import jadx.mcp.fast.FastProject.ResourceEntry;
+import jadx.mcp.dex.DexProject.ResourceEntry;
 import jadx.mcp.util.SchemaBuilder;
 import jadx.mcp.util.ToolException;
-import jadx.zip.IZipEntry;
 
 /**
  * {@code list_resources} tool: enumerate the project's resource manifest (zip entries) without
@@ -34,7 +32,7 @@ public final class ListResourcesTool extends AbstractTool {
 
 	@Override
 	public String description() {
-		return "List resources in the loaded APK / AAR / ZIP. Pure metadata — no decoding. Filter by `type` "
+		return "List resources in the loaded APK or DEX. Pure metadata — no decoding. Filter by `type` "
 				+ "(e.g. `lib`, `xml`, `manifest`, `arsc`, `code`), `path_prefix` (matched against the original "
 				+ "name, e.g. 'res/layout/'), or `path_glob` (e.g. '**/*.so'). The returned `name` can be "
 				+ "fed straight into `decompile_xml` (XML / MANIFEST entries) or `search_resource` (`path_prefix`).";
@@ -74,78 +72,35 @@ public final class ListResourcesTool extends AbstractTool {
 		int maxResults = Math.max(1, optInt(args, "max_results", 500));
 		int skip = Math.max(0, optInt(args, "offset", 0));
 		ResourceType filterType = wantedType;
-		if (session.isFast()) {
-			return session.fastRead(project -> {
-				List<Map<String, Object>> hits = new ArrayList<>();
-				int matched = 0;
-				for (ResourceEntry entry : project.resourceEntries()) {
-					if (filterType != null && entry.type() != filterType) {
-						continue;
-					}
-					String name = entry.name();
-					if (pathPrefix != null && !name.startsWith(pathPrefix)) {
-						continue;
-					}
-					if (globPattern != null && !globPattern.matcher(name).matches()) {
-						continue;
-					}
-					if (matched++ < skip || hits.size() >= maxResults) {
-						continue;
-					}
-					Map<String, Object> row = new LinkedHashMap<>();
-					row.put("name", name);
-					row.put("type", entry.type().name());
-					row.put("content_type", entry.type().getContentType().name());
-					if (entry.zipEntryName() != null) {
-						row.put("zip_entry_name", entry.zipEntryName());
-						row.put("size_uncompressed", entry.sizeBytes());
-						row.put("size_compressed", entry.compressedBytes());
-					}
-					hits.add(row);
-				}
-				Map<String, Object> body = new LinkedHashMap<>();
-				body.put("type", typeStr);
-				body.put("path_prefix", pathPrefix);
-				body.put("path_glob", pathGlob);
-				body.put("count", hits.size());
-				body.put("matched_total", matched);
-				body.put("offset", skip);
-				body.put("next_offset", matched > skip + hits.size() ? skip + hits.size() : -1);
-				body.put("resources", hits);
-				return body;
-			});
-		}
-
-		return session.read(decompiler -> {
-			List<ResourceFile> all = decompiler.getResources();
+		return session.read(project -> {
 			List<Map<String, Object>> hits = new ArrayList<>();
-			int seen = 0;
-			boolean hasMore = false;
 			int matched = 0;
-
-			for (ResourceFile rf : all) {
-				if (filterType != null && rf.getType() != filterType) {
+			for (ResourceEntry entry : project.resourceEntries()) {
+				if (filterType != null && entry.type() != filterType) {
 					continue;
 				}
-				String name = rf.getOriginalName();
+				String name = entry.name();
 				if (pathPrefix != null && !name.startsWith(pathPrefix)) {
 					continue;
 				}
 				if (globPattern != null && !globPattern.matcher(name).matches()) {
 					continue;
 				}
-				matched++;
-				seen++;
-				if (seen <= skip) {
+				if (matched++ < skip || hits.size() >= maxResults) {
 					continue;
 				}
-				if (hits.size() >= maxResults) {
-					hasMore = true;
-					continue;
+				Map<String, Object> row = new LinkedHashMap<>();
+				row.put("name", name);
+				row.put("type", entry.type().name());
+				row.put("content_type", entry.type().getContentType().name());
+				if (entry.sizeBytes() >= 0) {
+					row.put("size_uncompressed", entry.sizeBytes());
 				}
-				hits.add(rowFor(rf));
+				if (entry.compressedBytes() >= 0) {
+					row.put("size_compressed", entry.compressedBytes());
+				}
+				hits.add(row);
 			}
-
 			Map<String, Object> body = new LinkedHashMap<>();
 			body.put("type", typeStr);
 			body.put("path_prefix", pathPrefix);
@@ -153,29 +108,10 @@ public final class ListResourcesTool extends AbstractTool {
 			body.put("count", hits.size());
 			body.put("matched_total", matched);
 			body.put("offset", skip);
-			body.put("next_offset", hasMore ? skip + hits.size() : -1);
+			body.put("next_offset", matched > skip + hits.size() ? skip + hits.size() : -1);
 			body.put("resources", hits);
 			return body;
 		});
-	}
-
-	private static Map<String, Object> rowFor(ResourceFile rf) {
-		Map<String, Object> hit = new LinkedHashMap<>();
-		String name = rf.getOriginalName();
-		hit.put("name", name);
-		String deobf = rf.getDeobfName();
-		if (deobf != null && !deobf.equals(name)) {
-			hit.put("deobf_name", deobf);
-		}
-		hit.put("type", rf.getType().name());
-		hit.put("content_type", rf.getType().getContentType().name());
-		IZipEntry zip = rf.getZipEntry();
-		if (zip != null) {
-			hit.put("zip_entry_name", zip.getName());
-			hit.put("size_uncompressed", zip.getUncompressedSize());
-			hit.put("size_compressed", zip.getCompressedSize());
-		}
-		return hit;
 	}
 
 	/** Tiny glob -> regex helper supporting * (no /), ? (single char), and ** (any). */

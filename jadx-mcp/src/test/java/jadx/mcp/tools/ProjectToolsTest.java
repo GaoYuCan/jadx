@@ -1,18 +1,17 @@
 package jadx.mcp.tools;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import jadx.gui.settings.JadxProject;
-import jadx.gui.settings.data.ProjectData;
 import jadx.mcp.JadxSession;
 import jadx.mcp.util.ToolException;
 
@@ -35,20 +34,20 @@ class ProjectToolsTest {
 	void currentProjectReportsUnloadedState() {
 		Map<String, Object> result = call(new CurrentProjectTool(session), Map.of());
 
-		assertThat(result).containsOnly(Map.entry("loaded", false), Map.entry("mode", "none"));
+		assertThat(result).containsOnly(Map.entry("loaded", false));
 	}
 
 	@Test
 	void currentProjectReportsFileMetadataAndSurvivesDeletedInput() throws Exception {
-		Path input = copyFixtureClass();
-		load(input);
+		Path input = copyFixtureDex();
+		session.load(input.toFile());
 
 		Map<String, Object> result = call(new CurrentProjectTool(session), Map.of());
 		assertThat(result)
 				.containsEntry("loaded", true)
 				.containsEntry("input_file", input.toAbsolutePath().normalize().toString())
 				.containsEntry("file_name", input.getFileName().toString())
-				.containsEntry("extension", "class")
+				.containsEntry("extension", "dex")
 				.containsEntry("exists", true)
 				.containsKeys("size_bytes", "last_modified");
 
@@ -62,77 +61,46 @@ class ProjectToolsTest {
 
 	@Test
 	void openFileReturnsImmediatelyWhenInputIsAlreadyLoaded() throws Exception {
-		Path input = copyFixtureClass();
-		load(input);
-		Object decompiler = session.read(current -> current);
+		Path input = copyFixtureDex();
+		session.load(input.toFile());
+		Object project = session.read(current -> current);
 		Path equivalentPath = input.getParent().resolve(".").resolve(input.getFileName());
 
 		Map<String, Object> result = call(new OpenFileTool(session), Map.of(
-				"path", equivalentPath.toString(),
-				"skip_resources", false,
-				"threads_count", 8));
+				"path", equivalentPath.toString()));
 
 		assertThat(result)
 				.containsEntry("loaded", true)
 				.containsEntry("already_loaded", true)
-				.containsEntry("input_file", equivalentPath.toFile().getAbsolutePath())
-				.containsEntry("message", "项目已经加载。如果确定当前加载配置不适用于你的任务，请先调用 close_file，再重新调用 open_file。");
-		Object currentDecompiler = session.read(current -> current);
-		assertThat(currentDecompiler).isSameAs(decompiler);
+				.containsEntry("input_file", equivalentPath.toFile().getAbsolutePath());
+		Object currentProject = session.read(current -> current);
+		assertThat(currentProject).isSameAs(project);
 	}
 
 	@Test
-	void saveProjectWritesGuiCompatibleV2FileAndProtectsExistingOutput() throws Exception {
-		Path input = copyFixtureClass();
-		load(input);
-		Path requested = tempDir.resolve("analysis");
-
-		Map<String, Object> result = call(new SaveProjectTool(session), Map.of("output_path", requested.toString()));
-		Path output = tempDir.resolve("analysis.jadx");
-		assertThat(result)
-				.containsEntry("saved", true)
-				.containsEntry("output_file", output.toString())
-				.containsEntry("rename_count", 0);
-		assertThat(output).isRegularFile();
-
-		ProjectData project = JadxProject.loadProjectData(output);
-		assertThat(project.getProjectVersion()).isEqualTo(2);
-		assertThat(project.getFiles()).containsExactly(input.toAbsolutePath().normalize());
-		assertThat(project.getCodeData().getRenames()).isEmpty();
-
-		assertThatThrownBy(() -> new SaveProjectTool(session).call(Map.of("output_path", output.toString())))
-				.isInstanceOf(ToolException.class)
-				.extracting(e -> ((ToolException) e).code())
-				.isEqualTo(ToolException.Code.INVALID_ARG);
-
-		Map<String, Object> overwritten = call(new SaveProjectTool(session),
-				Map.of("output_path", output.toString(), "overwrite", true));
-		assertThat(overwritten).containsEntry("saved", true);
-	}
-
-	@Test
-	void saveProjectRequiresLoadedInput() {
-		assertThatThrownBy(() -> new SaveProjectTool(session)
-				.call(Map.of("output_path", tempDir.resolve("empty.jadx").toString())))
-						.isInstanceOf(ToolException.class)
-						.extracting(e -> ((ToolException) e).code())
-						.isEqualTo(ToolException.Code.NOT_LOADED);
-	}
-
-	private void load(Path input) {
-		session.load(input.toFile(), List.of(), true, 1);
-	}
-
-	private Path copyFixtureClass() throws IOException {
-		String resource = "/" + Fixture.class.getName().replace('.', '/') + ".class";
-		Path output = tempDir.resolve("ProjectToolsTest$Fixture.class");
-		try (InputStream in = Fixture.class.getResourceAsStream(resource)) {
-			if (in == null) {
-				throw new IOException("Missing test fixture resource: " + resource);
-			}
-			Files.copy(in, output);
+	void rejectsProjectsAndOrdinaryZipWithoutReplacingActiveInput() throws Exception {
+		Path input = copyFixtureDex();
+		session.load(input.toFile());
+		Path project = tempDir.resolve("sample.jadx");
+		Files.writeString(project, "{\"files\":[\"hello.dex\"]}");
+		Path zip = tempDir.resolve("ordinary.apk");
+		try (ZipOutputStream archive = new ZipOutputStream(Files.newOutputStream(zip))) {
+			archive.putNextEntry(new ZipEntry("readme.txt"));
+			archive.closeEntry();
 		}
-		return output;
+
+		OpenFileTool tool = new OpenFileTool(session);
+		for (Path unsupported : List.of(project, zip)) {
+			assertThatThrownBy(() -> tool.call(Map.of("path", unsupported.toString())))
+					.isInstanceOfSatisfying(ToolException.class, error ->
+							assertThat(error.code()).isEqualTo(ToolException.Code.UNSUPPORTED));
+		}
+		assertThat(session.getInputFile()).isEqualTo(input.toFile());
+	}
+
+	private Path copyFixtureDex() throws IOException {
+		Path fixture = Path.of("../jadx-cli/src/test/resources/samples/hello.dex");
+		return Files.copy(fixture, tempDir.resolve("hello.dex"));
 	}
 
 	@SuppressWarnings("unchecked")
@@ -143,14 +111,6 @@ class ProjectToolsTest {
 			throw e;
 		} catch (Exception e) {
 			throw new AssertionError(e);
-		}
-	}
-
-	private static final class Fixture {
-		private int value;
-
-		int increment(int input) {
-			return input + value;
 		}
 	}
 }

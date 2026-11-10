@@ -15,16 +15,12 @@ import jadx.mcp.tools.CurrentProjectTool;
 import jadx.mcp.tools.DecompileCodeTool;
 import jadx.mcp.tools.DecompileXmlTool;
 import jadx.mcp.tools.DisassembleTool;
-import jadx.mcp.tools.InheritanceTreeTool;
 import jadx.mcp.tools.ListClassMembersTool;
 import jadx.mcp.tools.ListClassesTool;
 import jadx.mcp.tools.ListResourcesTool;
-import jadx.mcp.tools.MethodOverridesTool;
 import jadx.mcp.tools.OpenFileTool;
-import jadx.mcp.tools.RenameTool;
 import jadx.mcp.tools.ResolveRefTool;
 import jadx.mcp.tools.RunScriptTool;
-import jadx.mcp.tools.SaveProjectTool;
 import jadx.mcp.tools.SearchCodeTool;
 import jadx.mcp.tools.SearchResourceTool;
 import jadx.mcp.tools.SearchStringsTool;
@@ -127,7 +123,6 @@ public final class JadxMcpServer {
 		server.addTool(new OpenFileTool(session).spec());
 		server.addTool(new CloseFileTool(session).spec());
 		server.addTool(new CurrentProjectTool(session).spec());
-		server.addTool(new SaveProjectTool(session).spec());
 		server.addTool(new RunScriptTool(session).spec());
 		// reverse-engineering tools
 		server.addTool(new DecompileCodeTool(session).spec());
@@ -138,14 +133,11 @@ public final class JadxMcpServer {
 		server.addTool(new SearchCodeTool(session).spec());
 		server.addTool(new SearchResourceTool(session).spec());
 		server.addTool(new XrefsToTool(session).spec());
-		server.addTool(new MethodOverridesTool(session).spec());
 		server.addTool(new ResolveRefTool(session).spec());
-		server.addTool(new RenameTool(session).spec());
 		// browse / navigate / analyze tools
 		server.addTool(new ListClassMembersTool(session).spec());
 		server.addTool(new ListClassesTool(session).spec());
 		server.addTool(new ListResourcesTool(session).spec());
-		server.addTool(new InheritanceTreeTool(session).spec());
 	}
 
 	private JadxMcpServer() {

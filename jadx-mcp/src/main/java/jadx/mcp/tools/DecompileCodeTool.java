@@ -55,8 +55,7 @@ public final class DecompileCodeTool extends AbstractTool {
 				+ "columns). When `annotate` is `inline` or `both`, the source itself is decorated with "
 				+ "`/*->Target#Rxx*/` block comments pinned to each call so deeply nested calls remain "
 				+ "unambiguous. `annotate=off` returns just the source. The line numbers in `code` and in `refs` "
-				+ "use the same coordinate space as `search_code` and `xrefs_to`. Set `include_variables=true` "
-				+ "to receive a `variables` sidecar containing precise `variable_id` handles for the `rename` tool.";
+				+ "refer to the full Java class. Set `include_variables=true` to include variable names, types, and locations.";
 	}
 
 	@Override
@@ -66,27 +65,19 @@ public final class DecompileCodeTool extends AbstractTool {
 				.enumString("annotate", "How to surface symbol references. Default 'sidecar'.", false,
 						"off", "sidecar", "inline", "both")
 				.bool("line_numbers", "Add a line-number gutter to `code`. Default true.", false)
-				.bool("include_variables", "Include renameable variable handles in a `variables` sidecar. Default false.", false)
+				.bool("include_variables", "Include variable metadata in a `variables` sidecar. Default false.", false)
 				.build();
 	}
 
 	@Override
 	protected Object call(Map<String, Object> args) {
-		if (session.isFast()) {
-			Target target = TargetParser.parse(requireString(args, "target"));
-			return session.withFastScope(Set.of(target.classFqn()), () -> callLoaded(args));
-		}
-		return callLoaded(args);
-	}
-
-	private Object callLoaded(Map<String, Object> args) {
 		Target target = TargetParser.parse(requireString(args, "target"));
 		String annotate = optString(args, "annotate", "sidecar");
 		boolean lineNumbers = optBool(args, "line_numbers", true);
 		boolean includeVariables = optBool(args, "include_variables", false);
 
-		return session.read(decompiler -> {
-			JavaClass javaClass = TargetResolver.resolveClass(session, target);
+		return session.withDecompiler(project -> Set.of(target.classFqn()), decompiler -> {
+			JavaClass javaClass = TargetResolver.resolveClass(decompiler, target.classFqn());
 			ICodeInfo codeInfo = javaClass.getCodeInfo();
 			String classCode = codeInfo.getCodeStr();
 
@@ -106,7 +97,7 @@ public final class DecompileCodeTool extends AbstractTool {
 			if (target.isClass()) {
 				slice = new Slice("class", null, classCode, 1);
 			} else {
-				JavaMethod method = TargetResolver.resolveMethod(session, target);
+				JavaMethod method = TargetResolver.resolveMethod(decompiler, target);
 				slice = sliceMethod(javaClass, method, codeInfo, classCode);
 			}
 
@@ -178,8 +169,6 @@ public final class DecompileCodeTool extends AbstractTool {
 			result.put("annotate", annotate);
 			result.put("code", code);
 			if (wantRefs && !"inline".equals(annotate)) {
-				result.put("refs", refsAsMaps(sliceRefs));
-			} else if (wantRefs && "both".equals(annotate)) {
 				result.put("refs", refsAsMaps(sliceRefs));
 			}
 			if (includeVariables) {

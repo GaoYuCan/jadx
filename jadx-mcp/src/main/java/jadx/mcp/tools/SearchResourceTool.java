@@ -76,11 +76,7 @@ public final class SearchResourceTool extends AbstractTool {
 		SearchEngine engine = new SearchEngine(query, regex, ignoreCase);
 		long maxBytes = (long) maxSizeKb * 1024L;
 
-		if (session.isFast()) {
-			return session.fastRead(project -> search(project.resources(), engine, pathPrefix,
-					globPattern, maxBytes, skip, maxResults));
-		}
-		return session.read(decompiler -> search(decompiler.getResources(), engine, pathPrefix,
+		return session.read(project -> search(project.resources(), engine, pathPrefix,
 				globPattern, maxBytes, skip, maxResults));
 	}
 

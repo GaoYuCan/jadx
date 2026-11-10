@@ -251,14 +251,14 @@ val records = variables.map { (position, variable) ->
 }
 ```
 
-`r<register>v<ssa>` 与 jadx-mcp variable rename 使用的句柄一致。
+`r<register>v<ssa>` 是 `decompile_code` 的 `variable_id` 格式。
 
 变量边界：
 
 - 一个源码变量可能合并多个 SSA 变量；
 - 临时表达式可能没有渲染声明；
 - debug 名与生成名可能不同；
-- 重新加载、rename 或改变反编译选项会改变 SSA version；
+- 重新加载或改变反编译选项会改变 SSA version；
 - `VAR_REF` 会关联回变量定义；
 - 无 debug 信息仍可能由 JADX 生成临时变量。
 
@@ -488,7 +488,7 @@ JADX 可能：
 - 内联类或方法；
 - 让 `codeParent` 与原始 owner 不同。
 
-jadx-mcp 会关闭部分改变结构的选项，但语言 metadata、输入插件和 rename 仍可能影响呈现。
+jadx-mcp 会关闭部分改变结构的选项，但语言 metadata 和输入插件 仍可能影响呈现。
 
 同时记录：
 

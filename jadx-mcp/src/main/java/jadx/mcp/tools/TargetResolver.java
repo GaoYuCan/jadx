@@ -7,13 +7,13 @@ import java.util.Map;
 
 import org.jetbrains.annotations.NotNull;
 
+import jadx.api.JadxDecompiler;
 import jadx.api.JavaClass;
 import jadx.api.JavaMethod;
-import jadx.mcp.JadxSession;
 import jadx.mcp.util.ToolException;
 
 /**
- * Resolves a {@link Target} against an active {@link JadxSession}.
+ * Resolves a {@link Target} against a local {@link JadxDecompiler}.
  * <p>
  * Class-only targets perform a straight FQN lookup. Method targets either match exactly by jvm short-id when
  * the descriptor is given, or, when only a method name is provided, return a single match if unambiguous and
@@ -25,20 +25,23 @@ public final class TargetResolver {
 	}
 
 	@NotNull
-	public static JavaClass resolveClass(JadxSession session, Target target) {
-		JavaClass cls = session.findClass(target.classFqn());
+	public static JavaClass resolveClass(JadxDecompiler decompiler, String fqn) {
+		JavaClass cls = decompiler.searchJavaClassByOrigFullName(fqn);
 		if (cls == null) {
-			throw ToolException.notFound("class", target.classFqn());
+			cls = decompiler.searchJavaClassByAliasFullName(fqn);
+		}
+		if (cls == null) {
+			throw ToolException.notFound("class", fqn);
 		}
 		return cls;
 	}
 
 	@NotNull
-	public static JavaMethod resolveMethod(JadxSession session, Target target) {
+	public static JavaMethod resolveMethod(JadxDecompiler decompiler, Target target) {
 		if (!target.isMethod()) {
 			throw ToolException.invalidArg("target", "expected a method target ('com.foo.A#bar' or with descriptor)");
 		}
-		JavaClass cls = resolveClass(session, target);
+		JavaClass cls = resolveClass(decompiler, target.classFqn());
 		if (target.shortId() != null) {
 			JavaMethod m = cls.searchMethodByShortId(target.shortId());
 			if (m == null) {

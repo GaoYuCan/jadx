@@ -1,35 +1,38 @@
-package jadx.mcp.fast;
+package jadx.mcp.dex;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import jadx.api.plugins.input.data.IFieldRef;
+import jadx.api.plugins.input.data.ICodeReader;
 import jadx.api.plugins.input.data.IMethodRef;
-import jadx.api.plugins.input.insns.InsnIndexType;
 import jadx.api.plugins.input.insns.Opcode;
-import jadx.mcp.fast.FastProject.ClassEntry;
+import jadx.mcp.dex.DexProject.ClassEntry;
 import jadx.mcp.util.ToolException;
+import jadx.plugins.input.dex.DexReader;
 
 /** Project-wide bytecode references, without constructing a project-wide JADX graph. */
-public final class FastXrefs {
-	private FastXrefs() {
+public final class DexXrefs {
+	private DexXrefs() {
 	}
 
-	public static Map<String, Object> search(FastProject project, String target, String kind,
-			String descriptor, int maxResults) {
+	public static Map<String, Object> search(DexProject project, String target, String kind, int maxResults) {
 		if (!kind.equals("class") && !kind.equals("method") && !kind.equals("field")) {
 			throw ToolException.invalidArg("kind", "must be one of class | method | field");
 		}
 		int hash = target.indexOf('#');
-		String owner = project.find(hash < 0 ? target : target.substring(0, hash)).fqn();
-		if (!kind.equals("class") && hash < 0) {
-			throw ToolException.invalidArg("target_fqn", "member target must contain '#'");
+		if (kind.equals("class") && hash >= 0) {
+			throw ToolException.invalidArg("target_fqn", "class target must not include a member");
 		}
+		if (!kind.equals("class") && (hash <= 0 || hash == target.length() - 1)) {
+			throw ToolException.invalidArg("target_fqn", "member target must use Class#member syntax");
+		}
+		String owner = hash < 0 ? target : target.substring(0, hash);
 		String member = hash < 0 ? null : target.substring(hash + 1);
-		String signature = descriptor;
+		String signature = null;
 		if (kind.equals("method")) {
 			int paren = member.indexOf('(');
 			if (paren >= 0) {
@@ -37,70 +40,45 @@ public final class FastXrefs {
 				member = member.substring(0, paren);
 			}
 			if (signature == null) {
-				signature = resolveDescriptor(project, project.find(owner), member);
+				ClassEntry ownerEntry = project.classes().get(owner);
+				if (ownerEntry == null) {
+					throw ToolException.invalidArg("target_fqn",
+							"include the JVM descriptor for external methods, e.g. Class#method(I)V");
+				}
+				signature = resolveDescriptor(ownerEntry, member);
 			}
-			member = project.rawMemberName(owner, member, signature, true);
-		}
-		String fieldType = null;
-		if (kind.equals("field") && member.contains(":")) {
+		} else if (kind.equals("field")) {
 			int colon = member.indexOf(':');
-			fieldType = member.substring(colon + 1);
-			member = member.substring(0, colon);
-		}
-		if (kind.equals("field")) {
-			member = project.rawMemberName(owner, member,
-					fieldType == null ? null : ':' + fieldType, false);
+			if (colon >= 0) {
+				signature = member.substring(colon + 1);
+				member = member.substring(0, colon);
+			}
 		}
 		final String memberName = member;
 		final String memberDescriptor = signature;
-		final String wantedFieldType = fieldType;
 		Map<String, Map<String, Object>> callers = new LinkedHashMap<>();
 		int[] summary = new int[3];
+		Map<DexReader, DexReferenceIds> idsByDex = new HashMap<>();
 		List<ClassEntry> entries = project.classes().values().stream()
+				.filter(entry -> !idsByDex.computeIfAbsent(entry.reader(),
+						dex -> DexReferenceIds.find(dex, kind, owner, memberName, memberDescriptor)).isEmpty())
 				.sorted(Comparator.comparing(ClassEntry::fqn)).toList();
 		for (ClassEntry entry : entries) {
+			DexReferenceIds ids = idsByDex.get(entry.reader());
 			entry.data().visitFieldsAndMethods(field -> {
 			}, method -> {
-				if (method.getCodeReader() == null) {
+				ICodeReader code = method.getCodeReader();
+				if (code == null) {
 					return;
 				}
-				IMethodRef callerRef = method.getMethodRef();
-				callerRef.load();
-				String callerDescriptor = FastSymbolSearch.descriptor(callerRef);
-				String callerKey = entry.fqn() + '#' + callerRef.getName() + callerDescriptor;
-				method.getCodeReader().copy().visitInstructions(insn -> {
-					InsnIndexType indexType = insn.getIndexType();
-					if (indexType != InsnIndexType.METHOD_REF && indexType != InsnIndexType.FIELD_REF
-							&& indexType != InsnIndexType.TYPE_REF) {
+				code.copy().visitInstructions(insn -> {
+					if (!ids.matches(insn)) {
 						return;
 					}
-					insn.decode();
-					String referencedOwner;
-					if (indexType == InsnIndexType.METHOD_REF) {
-						IMethodRef ref = insn.getIndexAsMethod();
-						ref.load();
-						referencedOwner = FastProject.dotName(ref.getParentClassType());
-						if (kind.equals("method") && (!referencedOwner.equals(owner)
-								|| !ref.getName().equals(memberName)
-								|| !FastSymbolSearch.descriptor(ref).equals(memberDescriptor))) {
-							return;
-						}
-					} else if (indexType == InsnIndexType.FIELD_REF) {
-						IFieldRef ref = insn.getIndexAsField();
-						referencedOwner = FastProject.dotName(ref.getParentClassType());
-						if (kind.equals("field") && (!referencedOwner.equals(owner)
-								|| !ref.getName().equals(memberName)
-								|| wantedFieldType != null && !wantedFieldType.equals(ref.getType()))) {
-							return;
-						}
-					} else {
-						referencedOwner = FastProject.dotName(insn.getIndexAsType());
-					}
-					if (kind.equals("class") ? !owner.equals(referencedOwner)
-							: kind.equals("method") && indexType != InsnIndexType.METHOD_REF
-								|| kind.equals("field") && indexType != InsnIndexType.FIELD_REF) {
-						return;
-					}
+					IMethodRef callerRef = method.getMethodRef();
+					callerRef.load();
+					String callerDescriptor = DexSymbolSearch.descriptor(callerRef);
+					String callerKey = entry.fqn() + '#' + callerRef.getName() + callerDescriptor;
 					Map<String, Object> row = callers.computeIfAbsent(callerKey, key -> {
 						Map<String, Object> created = new LinkedHashMap<>();
 						created.put("in_class", entry.fqn());
@@ -136,25 +114,22 @@ public final class FastXrefs {
 		body.put("kind", kind);
 		body.put("count", uses.size());
 		body.put("total", callers.size());
-		body.put("total_app", callers.size());
 		body.put("uses", uses);
 		if (kind.equals("field")) {
 			body.put("op_summary", Map.of("read_count", summary[0], "write_count", summary[1],
-					"init_count", summary[2], "indeterminate_count", 0));
+					"init_count", summary[2]));
 		}
 		return body;
 	}
 
-	private static String resolveDescriptor(FastProject project, ClassEntry owner, String name) {
+	private static String resolveDescriptor(ClassEntry owner, String name) {
 		List<String> matches = new ArrayList<>();
 		owner.data().visitFieldsAndMethods(field -> {
 		}, method -> {
 			IMethodRef ref = method.getMethodRef();
 			ref.load();
-			if (ref.getName().equals(name)
-					|| project.displayMemberName(owner.fqn(), ref.getName() + FastSymbolSearch.descriptor(ref),
-							ref.getName()).equals(name)) {
-				matches.add(FastSymbolSearch.descriptor(ref));
+			if (ref.getName().equals(name)) {
+				matches.add(DexSymbolSearch.descriptor(ref));
 			}
 		});
 		if (matches.isEmpty()) {

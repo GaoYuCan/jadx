@@ -1,22 +1,11 @@
 package jadx.mcp.tools;
 
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
-import jadx.api.JavaClass;
-import jadx.core.dex.info.MethodInfo;
-import jadx.core.dex.nodes.ClassNode;
-import jadx.core.dex.nodes.FieldNode;
-import jadx.core.dex.nodes.MethodNode;
 import jadx.mcp.JadxSession;
-import jadx.mcp.fast.FastSymbolSearch;
-import jadx.mcp.format.SymbolFormat;
+import jadx.mcp.dex.DexSymbolSearch;
 import jadx.mcp.search.SearchEngine;
 import jadx.mcp.search.SymbolFilter;
 import jadx.mcp.util.SchemaBuilder;
@@ -26,7 +15,7 @@ import jadx.mcp.util.ToolException;
  * {@code search_symbol} tool: fast metadata-only name lookup with structured filters.
  *
  * <p>Top-level params control HOW the name is matched (regex / case / full-name) and pagination.
- * Structural constraints (package, class scope, raw-name fallback, annotation, supertype, access flags,
+ * Structural constraints (package, class scope, annotation, supertype, access flags,
  * class kind) live under one nested {@code filter} object — keeps the schema flat for an LLM regardless
  * of how many filters are added later.
  *
@@ -100,14 +89,10 @@ public final class SearchSymbolTool extends AbstractTool {
 
 	private static void buildFilterSchema(SchemaBuilder b) {
 		b.string("package_prefix",
-				"Only consider classes whose FQN starts with this prefix (alias or raw form).",
+				"Only consider classes whose FQN starts with this prefix.",
 				false);
 		b.string("class_fqn",
 				"Only used when kind is 'method' or 'field'. Restrict the scan to a single class.",
-				false);
-		b.bool("include_raw_names",
-				"Also try matching `query` against the raw (pre-deobfuscation) name. "
-						+ "Useful on obfuscated APKs. Default false.",
 				false);
 		b.stringArray("access",
 				"Access-flag tokens. All required tokens must be set; tokens prefixed with '!' must be "
@@ -126,7 +111,7 @@ public final class SearchSymbolTool extends AbstractTool {
 				"Only when kind=class. Superclass FQN in dot form (e.g. 'android.app.Activity').",
 				false);
 		b.bool("superclass_transitive",
-				"With superclass: include the transitive subclass set (uses ClspGraph). Default false (direct only).",
+				"With superclass: include the transitive subclass set. Default false (direct only).",
 				false);
 		b.string("interface",
 				"Only when kind=class. Interface FQN in dot form.",
@@ -155,210 +140,7 @@ public final class SearchSymbolTool extends AbstractTool {
 			throw ToolException.invalidArg("query",
 					"either `query` or at least one `filter` constraint must be provided");
 		}
-		if (session.isFast()) {
-			return session.fastRead(project -> FastSymbolSearch.search(project, kind, engine,
-					matchFull, filter, skip, maxResults));
-		}
-
-		return session.read(decompiler -> {
-			List<JavaClass> scope = resolveScope(decompiler, filter, kind);
-			Set<String> superSubtypes = transitiveTypeSet(decompiler, kind, filter.superclass,
-					filter.superclassTransitive);
-			Set<String> interfaceImpls = transitiveTypeSet(decompiler, kind, filter.iface,
-					filter.interfaceTransitive);
-
-			List<Map<String, Object>> hits = new ArrayList<>();
-			Pager pager = new Pager(skip, maxResults);
-
-			for (JavaClass cls : scope) {
-				if (!filter.matchesPackagePrefix(cls)) {
-					continue;
-				}
-				boolean limitReached = false;
-				switch (kind) {
-					case "class":
-						if (!filter.matchesClassFilter(cls, superSubtypes, interfaceImpls)) {
-							continue;
-						}
-						if (engine != null && !matchesClassName(engine, cls, matchFull, filter.includeRawNames)) {
-							continue;
-						}
-						limitReached = pager.shouldEmit(hits, SymbolFormat.classHit(cls));
-						break;
-					case "method":
-						limitReached = collectMethods(cls, filter, engine, matchFull, hits, pager);
-						break;
-					case "field":
-						limitReached = collectFields(cls, filter, engine, matchFull, hits, pager);
-						break;
-				}
-				if (limitReached) {
-					break;
-				}
-			}
-
-			Map<String, Object> result = new LinkedHashMap<>();
-			result.put("kind", kind);
-			result.put("hits", hits);
-			result.put("count", hits.size());
-			result.put("offset", skip);
-			result.put("next_offset", pager.hitLimit ? skip + hits.size() : -1);
-			return result;
-		});
-	}
-
-	private List<JavaClass> resolveScope(jadx.api.JadxDecompiler decompiler, SymbolFilter filter, String kind) {
-		if (filter.classFqn == null) {
-			// Default scope hides aux. The transitive ClspGraph set used for `filter.superclass` /
-			// `filter.interface` may still contain aux FQNs internally, but since `cls` here is always
-			// drawn from appClasses(), those aux entries can only act as classifiers ("is this app class
-			// a subtype of an aux type?") — they can never appear as hits themselves.
-			return session.appClasses();
-		}
-		// kind=class is rejected up front in SymbolFilter.parse, but defensively re-check here.
-		if ("class".equals(kind)) {
-			throw ToolException.invalidArg("filter.class_fqn",
-					"is only meaningful for kind 'method' or 'field'");
-		}
-		// Explicit FQN lookup: aux is allowed (the user asked for the symbol by name).
-		JavaClass single = session.findClass(filter.classFqn);
-		if (single == null) {
-			throw ToolException.notFound("class", filter.classFqn);
-		}
-		return List.of(single);
-	}
-
-	private static @org.jetbrains.annotations.Nullable Set<String> transitiveTypeSet(
-			jadx.api.JadxDecompiler decompiler, String kind, @org.jetbrains.annotations.Nullable String typeName,
-			boolean transitive) {
-		if (!"class".equals(kind) || typeName == null || !transitive) {
-			return null;
-		}
-		return new HashSet<>(decompiler.getRoot().getClsp().getImplementations(typeName));
-	}
-
-	/** Returns true when {@code maxResults} was hit (caller should stop scanning further classes). */
-	private static boolean collectMethods(JavaClass cls, SymbolFilter filter,
-			@org.jetbrains.annotations.Nullable SearchEngine engine, boolean matchFull,
-			List<Map<String, Object>> hits, Pager pager) {
-		ClassNode cn = cls.getClassNode();
-		List<MethodNode> methods = cn.getMethods();
-		if (methods == null) {
-			return false;
-		}
-		for (MethodNode mth : methods) {
-			if (!filter.matchesAccessMask(mth.getAccessFlags().rawValue())) {
-				continue;
-			}
-			if (!filter.matchesAnnotation(mth)) {
-				continue;
-			}
-			if (engine != null && !matchesMethodName(engine, mth, matchFull, filter.includeRawNames)) {
-				continue;
-			}
-			if (pager.shouldEmit(hits, SymbolFormat.methodHit(cls, mth))) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/** Returns true when {@code maxResults} was hit. */
-	private static boolean collectFields(JavaClass cls, SymbolFilter filter,
-			@org.jetbrains.annotations.Nullable SearchEngine engine, boolean matchFull,
-			List<Map<String, Object>> hits, Pager pager) {
-		ClassNode cn = cls.getClassNode();
-		List<FieldNode> fields = cn.getFields();
-		if (fields == null) {
-			return false;
-		}
-		for (FieldNode fld : fields) {
-			if (!filter.matchesAccessMask(fld.getAccessFlags().rawValue())) {
-				continue;
-			}
-			if (!filter.matchesAnnotation(fld)) {
-				continue;
-			}
-			if (engine != null && !matchesFieldName(engine, cls, fld, matchFull, filter.includeRawNames)) {
-				continue;
-			}
-			if (pager.shouldEmit(hits, SymbolFormat.fieldHit(cls, fld))) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	// ---------- name matchers ----------
-
-	private static boolean matchesClassName(SearchEngine eng, JavaClass cls, boolean matchFull, boolean includeRaw) {
-		if (eng.find(matchFull ? cls.getFullName() : cls.getName(), 0) >= 0) {
-			return true;
-		}
-		if (includeRaw) {
-			String raw = cls.getRawName();
-			String rawSimple = simpleName(raw);
-			return eng.find(matchFull ? raw : rawSimple, 0) >= 0;
-		}
-		return false;
-	}
-
-	private static boolean matchesMethodName(SearchEngine eng, MethodNode mth, boolean matchFull, boolean includeRaw) {
-		MethodInfo info = mth.getMethodInfo();
-		if (eng.find(matchFull ? info.getAliasFullName() : info.getAlias(), 0) >= 0) {
-			return true;
-		}
-		if (includeRaw) {
-			return eng.find(matchFull ? info.getFullName() : info.getName(), 0) >= 0;
-		}
-		return false;
-	}
-
-	private static boolean matchesFieldName(SearchEngine eng, JavaClass cls, FieldNode fld,
-			boolean matchFull, boolean includeRaw) {
-		String alias = fld.getAlias();
-		if (eng.find(matchFull ? cls.getFullName() + "." + alias : alias, 0) >= 0) {
-			return true;
-		}
-		if (includeRaw) {
-			String name = fld.getName();
-			return eng.find(matchFull ? cls.getRawName() + "." + name : name, 0) >= 0;
-		}
-		return false;
-	}
-
-	private static String simpleName(String fqn) {
-		int dot = fqn.lastIndexOf('.');
-		return dot < 0 ? fqn : fqn.substring(dot + 1);
-	}
-
-	/**
-	 * Skip-then-collect helper for paginated iteration. Centralises the seen / skip / hitLimit
-	 * bookkeeping so each {@code collectXxx} loop stays a single readable sweep.
-	 */
-	private static final class Pager {
-		private final int skip;
-		private final int maxResults;
-		private int seen;
-		boolean hitLimit;
-
-		Pager(int skip, int maxResults) {
-			this.skip = skip;
-			this.maxResults = maxResults;
-		}
-
-		/** Adds {@code hit} when past the {@code skip} cursor; returns true after {@code maxResults}. */
-		boolean shouldEmit(List<Map<String, Object>> hits, Map<String, Object> hit) {
-			seen++;
-			if (seen <= skip) {
-				return false;
-			}
-			hits.add(hit);
-			if (hits.size() >= maxResults) {
-				hitLimit = true;
-				return true;
-			}
-			return false;
-		}
+		return session.read(project -> DexSymbolSearch.search(project, kind, engine,
+				matchFull, filter, skip, maxResults));
 	}
 }

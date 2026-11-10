@@ -43,7 +43,7 @@ public final class DecompileXmlTool extends AbstractTool {
 	@Override
 	public JsonSchema schema() {
 		return SchemaBuilder.object()
-				.string("resource_path", "Resource entry path or name, e.g. 'AndroidManifest.xml'.", true)
+				.string("resource_path", "Exact resource entry path, e.g. 'AndroidManifest.xml'.", true)
 				.bool("line_numbers", "Add line-number gutter to the returned text. Default true.", false)
 				.build();
 	}
@@ -52,10 +52,7 @@ public final class DecompileXmlTool extends AbstractTool {
 	protected Object call(Map<String, Object> args) {
 		String path = requireString(args, "resource_path");
 		boolean lineNumbers = optBool(args, "line_numbers", true);
-		if (session.isFast()) {
-			return session.fastRead(project -> decode(project.resources(), path, lineNumbers));
-		}
-		return session.read(decompiler -> decode(decompiler.getResources(), path, lineNumbers));
+		return session.read(project -> decode(project.resources(), path, lineNumbers));
 	}
 
 	private Object decode(List<ResourceFile> resources, String path, boolean lineNumbers) {
@@ -64,15 +61,6 @@ public final class DecompileXmlTool extends AbstractTool {
 			if (rf.getOriginalName().equals(path) || rf.getDeobfName().equals(path)) {
 				match = rf;
 				break;
-			}
-		}
-		if (match == null) {
-			// jadx resource paths sometimes start with archive prefixes.
-			for (ResourceFile rf : resources) {
-				if (rf.getOriginalName().endsWith(path) || rf.getDeobfName().endsWith(path)) {
-					match = rf;
-					break;
-				}
 			}
 		}
 		if (match == null) {

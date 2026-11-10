@@ -7,12 +7,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import io.modelcontextprotocol.spec.McpSchema.JsonSchema;
 
-import jadx.api.JavaClass;
 import jadx.api.plugins.input.data.IClassData;
 import jadx.api.plugins.input.data.IFieldData;
 import jadx.api.plugins.input.data.IMethodData;
@@ -30,7 +26,7 @@ import jadx.mcp.search.SearchEngine;
 import jadx.mcp.util.SchemaBuilder;
 
 /**
- * {@code search_strings} tool: byte-code level full-text search for string literals embedded in a dex / jar:
+ * {@code search_strings} tool: byte-code level full-text search for string literals embedded in DEX:
  * <ul>
  *   <li>{@code const-string} instructions in method bodies (the bulk of strings used in app logic),</li>
  *   <li>{@code static_values} on final fields (e.g. {@code static final String FOO = "..."}),</li>
@@ -45,8 +41,6 @@ import jadx.mcp.util.SchemaBuilder;
  * MethodNode IR is constructed. The same path that {@code UsageInfoVisitor} uses for cross-references.
  */
 public final class SearchStringsTool extends AbstractTool {
-
-	private static final Logger LOG = LoggerFactory.getLogger(SearchStringsTool.class);
 
 	private static final String KIND_CONST = "const_string";
 	private static final String KIND_STATIC = "static_value";
@@ -117,110 +111,47 @@ public final class SearchStringsTool extends AbstractTool {
 		SearchEngine engine = new SearchEngine(query, regex, ignoreCase);
 		long deadlineNanos = budgetMs > 0 ? System.nanoTime() + budgetMs * 1_000_000L : Long.MAX_VALUE;
 		long startNanos = System.nanoTime();
-		if (session.isFast()) {
-			return session.fastRead(project -> {
-				List<Map<String, Object>> hits = new ArrayList<>();
-				Counter seen = new Counter();
-				boolean cursorReached = startClassFqn == null;
-				boolean exceededBudget = false;
-				boolean hitLimit = false;
-				String nextClassFqn = null;
-				int nextOffset = -1;
-				int scanned = 0;
-				for (String fqn : project.classes().keySet().stream().sorted().toList()) {
-					if (!cursorReached) {
-						cursorReached = fqn.equals(startClassFqn);
-						if (!cursorReached) {
-							continue;
-						}
-					}
-					if (pkgPrefix != null && !fqn.startsWith(pkgPrefix)) {
-						continue;
-					}
-					if (System.nanoTime() >= deadlineNanos) {
-						exceededBudget = true;
-						nextClassFqn = fqn;
-						break;
-					}
-					scanned++;
-					int seenBeforeClass = seen.value;
-					if (scanClass(fqn, project.find(fqn).data(), engine, include,
-							hits, seen, skip, maxResults)) {
-						hitLimit = true;
-						nextClassFqn = fqn;
-						nextOffset = seen.value - seenBeforeClass;
-						break;
-					}
-				}
-				Map<String, Object> result = new LinkedHashMap<>();
-				result.put("hits", hits);
-				result.put("count", hits.size());
-				result.put("offset", skip);
-				result.put("next_offset", hitLimit ? nextOffset : -1);
-				result.put("next_class_fqn", nextClassFqn);
-				result.put("classes_scanned", scanned);
-				result.put("elapsed_ms", (System.nanoTime() - startNanos) / 1_000_000L);
-				result.put("exceeded_budget", exceededBudget);
-				return result;
-			});
-		}
-
-		return session.read(decompiler -> {
+		return session.read(project -> {
 			List<Map<String, Object>> hits = new ArrayList<>();
 			Counter seen = new Counter();
-			boolean exceededBudget = false;
-			String nextClassFqn = null;
 			boolean cursorReached = startClassFqn == null;
-			int classesScanned = 0;
+			boolean exceededBudget = false;
 			boolean hitLimit = false;
-
-			List<JavaClass> classes = session.appClasses();
-			for (JavaClass cls : classes) {
+			String nextClassFqn = null;
+			int nextOffset = -1;
+			int scanned = 0;
+			for (String fqn : project.classes().keySet().stream().sorted().toList()) {
 				if (!cursorReached) {
-					if (cls.getFullName().equals(startClassFqn)) {
-						cursorReached = true;
-					} else {
+					cursorReached = fqn.equals(startClassFqn);
+					if (!cursorReached) {
 						continue;
 					}
 				}
-				if (pkgPrefix != null && !cls.getFullName().startsWith(pkgPrefix)) {
+				if (pkgPrefix != null && !fqn.startsWith(pkgPrefix)) {
 					continue;
 				}
-				// Budget check at class boundary: we never start a class we can't finish.
 				if (System.nanoTime() >= deadlineNanos) {
 					exceededBudget = true;
-					nextClassFqn = cls.getFullName();
+					nextClassFqn = fqn;
 					break;
 				}
-				IClassData clsData;
-				try {
-					clsData = cls.getClassNode().getClsData();
-				} catch (Throwable t) {
-					LOG.debug("Failed to access ClsData for {}", cls.getFullName(), t);
-					continue;
-				}
-				if (clsData == null) {
-					// synthetic class (no on-disk dex/jar entry) — nothing to scan
-					continue;
-				}
-				classesScanned++;
-
-				hitLimit = scanClass(cls.getFullName(), clsData, engine, include, hits, seen, skip, maxResults);
-				if (hitLimit) {
-					// Resume from the SAME class on next call: there may be more matches in cls beyond
-					// the ones we've returned. Caller bumps `offset` to skip already-returned hits.
-					nextClassFqn = cls.getFullName();
+				scanned++;
+				int seenBeforeClass = seen.value;
+				if (scanClass(fqn, project.find(fqn).data(), engine, include,
+						hits, seen, skip, maxResults)) {
+					hitLimit = true;
+					nextClassFqn = fqn;
+					nextOffset = seen.value - seenBeforeClass;
 					break;
 				}
 			}
-
 			Map<String, Object> result = new LinkedHashMap<>();
 			result.put("hits", hits);
 			result.put("count", hits.size());
 			result.put("offset", skip);
-			result.put("next_offset", hitLimit ? skip + hits.size() : -1);
+			result.put("next_offset", hitLimit ? nextOffset : -1);
 			result.put("next_class_fqn", nextClassFqn);
-			result.put("classes_scanned", classesScanned);
+			result.put("classes_scanned", scanned);
 			result.put("elapsed_ms", (System.nanoTime() - startNanos) / 1_000_000L);
 			result.put("exceeded_budget", exceededBudget);
 			return result;

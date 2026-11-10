@@ -1,11 +1,10 @@
 package jadx.mcp.tools;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
@@ -31,9 +30,8 @@ class KotlinScriptRunnerIntegrationTest {
 
 	@Test
 	void executesPathAndInlineAfterLoadAgainstCurrentDecompilerWhenPluginIsInstalled() throws Exception {
-		Path input = copyFixtureClass();
-		session.load(input.toFile(), List.of(), true, 1);
-		boolean pluginInstalled = session.read(decompiler -> decompiler.getPluginManager()
+		session.load(Path.of("../jadx-cli/src/test/resources/samples/hello.dex").toFile());
+		boolean pluginInstalled = session.withDecompiler(project -> Set.of("HelloWorld"), decompiler -> decompiler.getPluginManager()
 				.getResolvedPluginContexts()
 				.stream()
 				.anyMatch(context -> context.getPluginId().equals("jadx-script-kotlin")));
@@ -47,12 +45,14 @@ class KotlinScriptRunnerIntegrationTest {
 						+ "}\n");
 		@SuppressWarnings("unchecked")
 		Map<String, Object> pathResult = (Map<String, Object>) new RunScriptTool(session).call(Map.of(
+				"class_fqns", List.of("HelloWorld"),
 				"script_path",
 				script.toString()));
 		assertSuccessfulLog(pathResult, "path", "mcp-path-class-count=");
 
 		@SuppressWarnings("unchecked")
 		Map<String, Object> textResult = (Map<String, Object>) new RunScriptTool(session).call(Map.of(
+				"class_fqns", List.of("HelloWorld"),
 				"script_text",
 				"val jadx = getJadxInstance()\n"
 						+ "jadx.afterLoad {\n"
@@ -71,23 +71,5 @@ class KotlinScriptRunnerIntegrationTest {
 		assertThat(logs)
 				.extracting(entry -> entry.message)
 				.anyMatch(message -> message.startsWith(prefix));
-	}
-
-	private Path copyFixtureClass() throws IOException {
-		String resource = "/" + Fixture.class.getName().replace('.', '/') + ".class";
-		Path output = tempDir.resolve("KotlinScriptRunnerIntegrationTest$Fixture.class");
-		try (InputStream in = Fixture.class.getResourceAsStream(resource)) {
-			if (in == null) {
-				throw new IOException("Missing test fixture resource: " + resource);
-			}
-			Files.copy(in, output);
-		}
-		return output;
-	}
-
-	private static final class Fixture {
-		int value() {
-			return 1;
-		}
 	}
 }

@@ -21,7 +21,6 @@ import jadx.core.dex.nodes.MethodNode;
 import jadx.mcp.JadxSession;
 import jadx.mcp.format.SymbolFormat;
 import jadx.mcp.util.SchemaBuilder;
-import jadx.mcp.util.ToolException;
 
 /**
  * {@code class_members} tool: returns a class's methods and fields with descriptors and access flags
@@ -52,9 +51,9 @@ public final class ListClassMembersTool extends AbstractTool {
 	@Override
 	public JsonSchema schema() {
 		return SchemaBuilder.object()
-				.string("class_fqn", "Fully qualified class name (alias or raw form). Required.", true)
+				.string("class_fqn", "Raw fully qualified class name. Required.", true)
 				.bool("include_inherited",
-						"Also list methods / fields declared on the supertype chain (default false). When "
+						"Also list methods / fields declared on the loaded superclass chain (default false). When "
 								+ "enabled, each inherited member carries a `declared_in` field with the "
 								+ "FQN of the original declarer; same-named overrides on the subject class "
 								+ "are listed once (subject-class declaration wins).",
@@ -64,31 +63,21 @@ public final class ListClassMembersTool extends AbstractTool {
 
 	@Override
 	protected Object call(Map<String, Object> args) {
-		if (session.isFast()) {
-			String fqn = requireString(args, "class_fqn");
-			Set<String> scope = session.fastRead(project -> {
-				Set<String> names = new LinkedHashSet<>();
-				String next = project.find(fqn).fqn();
-				while (next != null && project.classes().containsKey(next) && names.add(next)) {
-					next = optBool(args, "include_inherited", false)
-							? project.find(next).superClass() : null;
-				}
-				return names;
-			});
-			return session.withFastScope(scope, () -> callLoaded(args));
-		}
-		return callLoaded(args);
-	}
-
-	private Object callLoaded(Map<String, Object> args) {
 		String classFqn = requireString(args, "class_fqn");
 		boolean includeInherited = optBool(args, "include_inherited", false);
 
-		return session.read(decompiler -> {
-			JavaClass cls = session.findClass(classFqn);
-			if (cls == null) {
-				throw ToolException.notFound("class", classFqn);
+		return session.withDecompiler(project -> {
+			Set<String> scope = new LinkedHashSet<>();
+			String next = classFqn;
+			while (scope.add(next) && includeInherited) {
+				next = project.find(next).superClass();
+				if (next == null || !project.classes().containsKey(next)) {
+					break;
+				}
 			}
+			return scope;
+		}, decompiler -> {
+			JavaClass cls = TargetResolver.resolveClass(decompiler, classFqn);
 			ClassNode cn = cls.getClassNode();
 
 			Map<String, Object> body = new LinkedHashMap<>();
@@ -167,8 +156,7 @@ public final class ListClassMembersTool extends AbstractTool {
 		if ("java.lang.Object".equals(superName)) {
 			return null;
 		}
-		JavaClass jc = session.findClass(superName);
-		return jc == null ? null : jc.getClassNode();
+		return cn.root().resolveClass(sup);
 	}
 
 	private static Map<String, Object> classMeta(ClassNode cn) {

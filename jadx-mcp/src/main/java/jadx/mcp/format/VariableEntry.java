@@ -1,6 +1,6 @@
 package jadx.mcp.format;
 
-/** One renameable method variable discovered in decompiled code metadata. */
+/** One method variable discovered in decompiled code metadata. */
 public final class VariableEntry {
 	private final String variableId;
 	private final String name;

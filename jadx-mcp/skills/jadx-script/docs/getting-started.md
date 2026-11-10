@@ -31,7 +31,7 @@
 
 - 遍历大量类或方法；
 - 对数百个目标执行同一种提取；
-- 联合指令、方法、类、源码元数据或资源信息；
+- 联合指令、方法、类和源码元数据；
 - 构建调用图、继承索引、数据流或别名关系；
 - 需要稳定、可复现、可 diff 的结构化结果；
 - 需要把结果交给后续程序或分析任务；
@@ -47,14 +47,11 @@
 
 ```json
 {
-  "path": "/absolute/path/app.apk",
-  "mode": "full"
+  "path": "/absolute/path/app.apk"
 }
 ```
 
-`open_file` 默认 `mode=auto`，APK/DEX 会进入快速模式。全项目遍历、资源脚本使用 `mode=full`；只分析已知类时可保留快速模式。
-
-输入也可以是 `.dex`、`.jar`、`.class`、`.smali`、`.aar`、`.aab`、`.xapk`、`.apkm` 或已保存的 `.jadx` 项目。
+`open_file` 接受 APK 或 DEX。先用 `list_classes` 或 `search_symbol` 找出需要传给脚本的类。
 
 项目不确定时调用 `current_project`。未加载项目时，`run_script` 返回未加载错误。
 
@@ -64,6 +61,7 @@
 
 ```json
 {
+  "class_fqns": ["com.example.Target"],
   "script_path": "/absolute/path/analyze.jadx.kts"
 }
 ```
@@ -72,11 +70,12 @@
 
 ```json
 {
+  "class_fqns": ["com.example.Target"],
   "script_text": "val jadx = getJadxInstance()\njadx.afterLoad { log.info { \"classes=${jadx.classes.size}\" } }"
 }
 ```
 
-快速模式还须提供 `class_fqns`，例如 `"class_fqns": ["com.example.Target"]`。脚本的 JADX 视图只含这些类；跨类遍历与资源脚本须在完整模式运行。`current_project.mode` 可确认实际模式。
+`class_fqns` 必填，使用原始类名。脚本在这些类组成的临时 JADX 上下文中运行；APK 资源通过 MCP 的资源工具查询。
 
 约束：
 
@@ -86,8 +85,6 @@
 - 路径必须存在且是普通文件；
 - 路径文件名必须以 `.jadx.kts` 结尾；
 - 文本模式会创建临时 `.jadx.kts`，执行后删除。
-
-完整模式在当前 `JadxDecompiler` 上执行脚本；快速模式为指定类创建临时局部视图，不重新打开原始输入。
 
 ## 返回值
 
@@ -127,7 +124,7 @@ runner 捕获到脚本 logger 的 `ERROR` 级事件时，`success` 也会变成 
 - `val jadx = getJadxInstance()`；
 - `jadx.afterLoad {}` 注册。
 
-项目遍历、反编译和资源读取放进 `afterLoad`，使执行边界与项目加载状态保持一致。
+类遍历和反编译放进 `afterLoad`。
 
 避免注册长期存活的对象：
 
@@ -137,21 +134,15 @@ runner 捕获到脚本 logger 的 `ERROR` 级事件时，`success` 也会变成 
 - 依赖脚本 classloader 的长期事件回调；
 - `afterLoad` 之外的异步任务。
 
-脚本运行期间持有 `JadxSession` 写锁。`open_file`、`close_file`、`rename`、`save_project` 和其他需要会话锁的操作必须等待脚本结束。
+脚本运行期间持有 `JadxSession` 写锁。`open_file`、`close_file` 和其他需要会话锁的操作必须等待脚本结束。
 
-runner 会临时把脚本文件加入 `jadx.args.inputFiles`，执行后恢复。记录真实程序输入时过滤 `.jadx.kts`：
-
-```kotlin
-val programInputs = jadx.args.inputFiles
-	.filterNot { it.name.endsWith(".jadx.kts") }
-	.map { it.absolutePath }
-```
+从 `current_project` 获取输入路径。如果脚本需要记录输入文件，把该路径写入脚本配置。
 
 ## 文本模式与路径模式
 
 `script_text` 适合：
 
-- 类或资源计数；
+- 类或成员计数；
 - 验证一个 import；
 - 查看一个 API 属性名；
 - 输出少量 descriptor；
@@ -204,6 +195,7 @@ import java.io.File
 data class Config(
 	val packagePrefix: String = "",
 	val outputPath: String? = null,
+	val inputPath: String? = null,
 )
 
 data class ClassRecord(
@@ -249,14 +241,9 @@ jadx.afterLoad {
 		.sortedBy(ClassRecord::rawName)
 		.toList()
 
-	val inputs = jadx.args.inputFiles
-		.filterNot { it.name.endsWith(".jadx.kts") }
-		.map { it.absolutePath }
-		.sorted()
-
 	val result = Result(
 		schemaVersion = 1,
-		inputFiles = inputs,
+		inputFiles = listOfNotNull(config.inputPath),
 		config = config,
 		classes = classes,
 	)

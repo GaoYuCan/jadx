@@ -1,30 +1,11 @@
 package jadx.mcp.format;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
-import jadx.api.JavaClass;
 import jadx.core.dex.info.AccessInfo;
-import jadx.core.dex.info.MethodInfo;
-import jadx.core.dex.nodes.FieldNode;
-import jadx.core.dex.nodes.MethodNode;
 
-/**
- * Shared formatters for symbol-table entries (classes / methods / fields) used by every tool that
- * surfaces them to the MCP wire. Keeps the JSON shape consistent across {@code search_symbol},
- * {@code class_members}, {@code list_classes}, etc.
- *
- * <p>Output contract:
- * <ul>
- *   <li>{@code access} is always a string array of human-readable tokens, never a raw int.</li>
- *   <li>Aliases are reported as the primary {@code name} / {@code fqn}; raw bytecode names are
- *       emitted as {@code raw_*} sibling fields only when they differ.</li>
- *   <li>{@code target} strings are formatted such that they round-trip through
- *       {@link jadx.mcp.tools.TargetParser} and {@code decompile_code} / {@code xrefs_to} verbatim.</li>
- * </ul>
- */
+/** Shared class-kind and access-flag formatting for symbol tools. */
 public final class SymbolFormat {
 
 	private SymbolFormat() {
@@ -112,60 +93,5 @@ public final class SymbolFormat {
 				break;
 		}
 		return out;
-	}
-
-	/**
-	 * Standard hit shape for a class. Always includes {@code target}, {@code name}, {@code fqn};
-	 * adds {@code raw_fqn} only when the alias differs from the raw name.
-	 */
-	public static Map<String, Object> classHit(JavaClass cls) {
-		Map<String, Object> hit = new LinkedHashMap<>();
-		String fqn = cls.getFullName();
-		hit.put("target", fqn);
-		hit.put("name", cls.getName());
-		hit.put("fqn", fqn);
-		String raw = cls.getRawName();
-		if (!fqn.equals(raw)) {
-			hit.put("raw_fqn", raw);
-		}
-		return hit;
-	}
-
-	/**
-	 * Standard hit shape for a method. {@code short_id} is jadx's
-	 * {@code name(jvmArgs)retDescriptor} form; {@code target = classFqn + '#' + short_id} is the
-	 * canonical cross-tool reference.
-	 */
-	public static Map<String, Object> methodHit(JavaClass cls, MethodNode mth) {
-		MethodInfo info = mth.getMethodInfo();
-		String classFqn = cls.getFullName();
-		String shortId = info.getShortId();
-		Map<String, Object> hit = new LinkedHashMap<>();
-		hit.put("target", classFqn + "#" + shortId);
-		hit.put("class_fqn", classFqn);
-		hit.put("name", info.getAlias());
-		hit.put("short_id", shortId);
-		if (!classFqn.equals(cls.getRawName())) {
-			hit.put("raw_class_fqn", cls.getRawName());
-		}
-		String raw = info.getName();
-		if (!raw.equals(info.getAlias())) {
-			hit.put("raw_name", raw);
-		}
-		return hit;
-	}
-
-	/** Standard hit shape for a field. {@code target = classFqn + '#' + alias}. */
-	public static Map<String, Object> fieldHit(JavaClass cls, FieldNode fld) {
-		String classFqn = cls.getFullName();
-		Map<String, Object> hit = new LinkedHashMap<>();
-		hit.put("target", classFqn + "#" + fld.getAlias());
-		hit.put("class_fqn", classFqn);
-		hit.put("name", fld.getAlias());
-		String raw = fld.getName();
-		if (!raw.equals(fld.getAlias())) {
-			hit.put("raw_name", raw);
-		}
-		return hit;
 	}
 }

@@ -105,7 +105,6 @@ jadx.afterLoad {
 | `classes` | 顶层 API 类 |
 | `classesWithInners` | 包含内部类的 API 类 |
 | `packages` | 包树 |
-| `resources` | 已加载资源 |
 | `root` | 内部 `RootNode` |
 | `args` | 当前参数 |
 | `errorsCount` | JADX 全局错误计数 |
@@ -129,21 +128,7 @@ val cls = decompiler
 
 不要调用 `load`、`close`、`reloadPasses`、`addCustomPass` 等生命周期方法。会话负责反编译器生命周期。
 
-输入：
-
-```kotlin
-val inputFiles = decompiler.args.inputFiles
-	.filterNot { it.name.endsWith(".jadx.kts") }
-	.map { it.absolutePath }
-```
-
-资源：
-
-```kotlin
-val resources = decompiler.resources
-```
-
-若 `args.isSkipResources` 为 `true`，资源可能为空。
+MCP 脚本通过 `class_fqns` 加载类。输入文件路径从 MCP `current_project` 获取，资源通过资源工具查询。
 
 ## JavaClass
 
@@ -312,7 +297,7 @@ com.example.Owner#fieldName:Ljava/lang/String;
 val variableId = "r${variable.reg}v${variable.ssa}"
 ```
 
-改变 rename、反编译参数或重新加载后，重新生成变量句柄。
+重新加载或改变反编译参数后，重新生成变量标识。
 
 ## JavaPackage
 
@@ -603,7 +588,7 @@ for (cls in jadx.classes) {
 | --- | --- |
 | `jadx.addPass` | runner 拒绝 pass 注册 |
 | `jadx.stages.*` | 用于注册自定义反编译 pass |
-| `jadx.rename.*` | 会注册 rename pass；改用 MCP `rename` |
+| `jadx.rename.*` | 会注册重命名 pass |
 | `jadx.replace.*` | 会注册指令替换 pass |
 | `jadx.gui.*` | MCP 服务没有 GUI 上下文 |
 | option 注册 | MCP 调用不提供每脚本插件选项 |

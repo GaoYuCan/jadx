@@ -23,17 +23,8 @@ dependencies {
 	implementation(project(":jadx-plugins-tools"))
 	implementation(project(":jadx-commons:jadx-app-commons"))
 
-	// same input plugins as jadx-cli, so the MCP server can decode any supported input
-	runtimeOnly(project(":jadx-plugins:jadx-java-input"))
-	runtimeOnly(project(":jadx-plugins:jadx-java-convert"))
-	runtimeOnly(project(":jadx-plugins:jadx-smali-input"))
-	runtimeOnly(project(":jadx-plugins:jadx-rename-mappings"))
 	runtimeOnly(project(":jadx-plugins:jadx-kotlin-metadata"))
 	runtimeOnly(project(":jadx-plugins:jadx-kotlin-source-debug-extension"))
-	runtimeOnly(project(":jadx-plugins:jadx-xapk-input"))
-	runtimeOnly(project(":jadx-plugins:jadx-aab-input"))
-	runtimeOnly(project(":jadx-plugins:jadx-apkm-input"))
-	runtimeOnly(project(":jadx-plugins:jadx-apks-input"))
 
 	implementation("org.jcommander:jcommander:2.0")
 	implementation("ch.qos.logback:logback-classic:1.5.32")
@@ -43,15 +34,6 @@ dependencies {
 	implementation("io.modelcontextprotocol.sdk:mcp:1.0.0")
 	implementation("org.eclipse.jetty:jetty-server:12.1.11")
 	implementation("org.eclipse.jetty.ee11:jetty-ee11-servlet:12.1.11")
-
-	testImplementation(
-		project
-			.project(":jadx-core")
-			.sourceSets
-			.getByName("test")
-			.output,
-	)
-	testImplementation(project(":jadx-gui"))
 }
 
 application {

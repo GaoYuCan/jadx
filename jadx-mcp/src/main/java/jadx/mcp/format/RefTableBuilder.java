@@ -42,7 +42,7 @@ public final class RefTableBuilder {
 		String classFqn = javaClass.getFullName();
 		List<RefEntry> entries = new ArrayList<>();
 		if (!codeInfo.hasMetadata()) {
-			return new RefTable(classFqn, entries);
+			return new RefTable(entries);
 		}
 		Map<Integer, ICodeAnnotation> map = codeInfo.getCodeMetadata().getAsMap();
 		// stable order by position
@@ -98,7 +98,7 @@ public final class RefTableBuilder {
 			counter++;
 			entries.add(new RefEntry(refId, line, col, pos, kind, targetFqn, targetMember, targetDescriptor, snippet));
 		}
-		return new RefTable(classFqn, entries);
+		return new RefTable(entries);
 	}
 
 	private static boolean isKept(ICodeAnnotation ann) {

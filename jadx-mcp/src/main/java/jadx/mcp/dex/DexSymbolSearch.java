@@ -1,4 +1,4 @@
-package jadx.mcp.fast;
+package jadx.mcp.dex;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -9,21 +9,22 @@ import java.util.Map;
 import java.util.Set;
 
 import jadx.api.plugins.input.data.IClassData;
+import jadx.api.plugins.input.data.IMethodProto;
 import jadx.api.plugins.input.data.IMethodRef;
 import jadx.api.plugins.input.data.attributes.IJadxAttribute;
 import jadx.api.plugins.input.data.attributes.types.AnnotationsAttr;
 import jadx.core.dex.info.AccessInfo;
-import jadx.mcp.fast.FastProject.ClassEntry;
+import jadx.mcp.dex.DexProject.ClassEntry;
 import jadx.mcp.format.SymbolFormat;
 import jadx.mcp.search.SearchEngine;
 import jadx.mcp.search.SymbolFilter;
 
 /** Metadata-only symbol search over original DEX class definitions. */
-public final class FastSymbolSearch {
-	private FastSymbolSearch() {
+public final class DexSymbolSearch {
+	private DexSymbolSearch() {
 	}
 
-	public static Map<String, Object> search(FastProject project, String kind, SearchEngine query,
+	public static Map<String, Object> search(DexProject project, String kind, SearchEngine query,
 			boolean matchFull, SymbolFilter filter, int offset, int limit) {
 		List<Map<String, Object>> hits = new ArrayList<>();
 		int[] seen = { 0 };
@@ -36,22 +37,16 @@ public final class FastSymbolSearch {
 		}
 		for (ClassEntry entry : classes) {
 			String fqn = entry.fqn();
-			String displayFqn = project.displayClassFqn(fqn);
-			if (filter.packagePrefix != null && !displayFqn.startsWith(filter.packagePrefix)
-					&& !(filter.includeRawNames && fqn.startsWith(filter.packagePrefix))) {
+			if (filter.packagePrefix != null && !fqn.startsWith(filter.packagePrefix)) {
 				continue;
 			}
 			if (kind.equals("class")) {
 				if (classMatches(project, entry, filter)
-						&& nameMatches(query, matchFull ? displayFqn : simpleName(displayFqn),
-								matchFull ? fqn : simpleName(fqn), filter.includeRawNames)) {
+						&& nameMatches(query, matchFull ? fqn : simpleName(fqn))) {
 					Map<String, Object> row = new LinkedHashMap<>();
 					row.put("target", fqn);
-					row.put("name", simpleName(displayFqn));
-					row.put("fqn", displayFqn);
-					if (!displayFqn.equals(fqn)) {
-						row.put("raw_fqn", fqn);
-					}
+					row.put("name", simpleName(fqn));
+					row.put("fqn", fqn);
 					add(hits, seen, row, offset, limit);
 				}
 			} else {
@@ -61,17 +56,12 @@ public final class FastSymbolSearch {
 							|| filter.annotation != null && !hasAnnotation(field.getAttributes(), filter.annotation)) {
 						return;
 					}
-					String rawName = field.getName();
-					String name = project.displayMemberName(fqn, rawName + ':' + field.getType(), rawName);
-					if (nameMatches(query, matchFull ? displayFqn + '.' + name : name,
-							matchFull ? fqn + '.' + rawName : rawName, filter.includeRawNames)) {
+					String name = field.getName();
+					if (nameMatches(query, matchFull ? fqn + '.' + name : name)) {
 						Map<String, Object> row = new LinkedHashMap<>();
-						row.put("target", fqn + '#' + rawName);
-						row.put("class_fqn", displayFqn);
+						row.put("target", fqn + '#' + name);
+						row.put("class_fqn", fqn);
 						row.put("name", name);
-						if (!name.equals(rawName)) {
-							row.put("raw_name", rawName);
-						}
 						add(hits, seen, row, offset, limit);
 					}
 				}, method -> {
@@ -81,19 +71,14 @@ public final class FastSymbolSearch {
 					}
 					IMethodRef ref = method.getMethodRef();
 					ref.load();
-					String rawName = ref.getName();
+					String name = ref.getName();
 					String descriptor = descriptor(ref);
-					String name = project.displayMemberName(fqn, rawName + descriptor, rawName);
-					if (nameMatches(query, matchFull ? displayFqn + '.' + name : name,
-							matchFull ? fqn + '.' + rawName : rawName, filter.includeRawNames)) {
+					if (nameMatches(query, matchFull ? fqn + '.' + name : name)) {
 						Map<String, Object> row = new LinkedHashMap<>();
-						row.put("target", fqn + '#' + rawName + descriptor);
-						row.put("class_fqn", displayFqn);
+						row.put("target", fqn + '#' + name + descriptor);
+						row.put("class_fqn", fqn);
 						row.put("name", name);
 						row.put("short_id", name + descriptor);
-						if (!name.equals(rawName)) {
-							row.put("raw_name", rawName);
-						}
 						add(hits, seen, row, offset, limit);
 					}
 				});
@@ -111,7 +96,7 @@ public final class FastSymbolSearch {
 		return result;
 	}
 
-	private static boolean classMatches(FastProject project, ClassEntry entry, SymbolFilter filter) {
+	private static boolean classMatches(DexProject project, ClassEntry entry, SymbolFilter filter) {
 		if (!filter.matchesAccessMask(entry.access())) {
 			return false;
 		}
@@ -130,7 +115,7 @@ public final class FastSymbolSearch {
 		return filter.annotation == null || hasAnnotation(entry.data().getAttributes(), filter.annotation);
 	}
 
-	private static boolean extendsClass(FastProject project, ClassEntry entry, String wanted, boolean transitive) {
+	private static boolean extendsClass(DexProject project, ClassEntry entry, String wanted, boolean transitive) {
 		String next = entry.superClass();
 		Set<String> visited = new HashSet<>();
 		while (next != null && visited.add(next)) {
@@ -146,12 +131,12 @@ public final class FastSymbolSearch {
 		return false;
 	}
 
-	private static boolean implementsInterface(FastProject project, ClassEntry entry, String wanted,
+	private static boolean implementsInterface(DexProject project, ClassEntry entry, String wanted,
 			boolean transitive) {
 		return implementsInterface(project, entry, wanted, transitive, new HashSet<>());
 	}
 
-	private static boolean implementsInterface(FastProject project, ClassEntry entry, String wanted,
+	private static boolean implementsInterface(DexProject project, ClassEntry entry, String wanted,
 			boolean transitive, Set<String> visited) {
 		if (!visited.add(entry.fqn())) {
 			return false;
@@ -184,9 +169,8 @@ public final class FastSymbolSearch {
 		return false;
 	}
 
-	private static boolean nameMatches(SearchEngine query, String name, String rawName, boolean includeRaw) {
-		return query == null || query.find(name, 0) >= 0
-				|| includeRaw && query.find(rawName, 0) >= 0;
+	private static boolean nameMatches(SearchEngine query, String name) {
+		return query == null || query.find(name, 0) >= 0;
 	}
 
 	private static void add(List<Map<String, Object>> hits, int[] seen, Map<String, Object> row,
@@ -201,7 +185,7 @@ public final class FastSymbolSearch {
 		return fqn.substring(fqn.lastIndexOf('.') + 1);
 	}
 
-	public static String descriptor(IMethodRef ref) {
-		return "(" + String.join("", ref.getArgTypes()) + ")" + ref.getReturnType();
+	public static String descriptor(IMethodProto proto) {
+		return "(" + String.join("", proto.getArgTypes()) + ")" + proto.getReturnType();
 	}
 }

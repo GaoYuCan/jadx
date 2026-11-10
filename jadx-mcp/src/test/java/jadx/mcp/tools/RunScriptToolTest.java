@@ -1,7 +1,6 @@
 package jadx.mcp.tools;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -31,8 +30,7 @@ class RunScriptToolTest {
 
 	@BeforeEach
 	void openFixture() throws Exception {
-		Path input = copyFixtureClass();
-		session.load(input.toFile(), List.of(), true, 1);
+		session.load(Path.of("../jadx-cli/src/test/resources/samples/hello.dex").toFile());
 	}
 
 	@AfterEach
@@ -45,7 +43,7 @@ class RunScriptToolTest {
 		Path script = tempDir.resolve("analyze.jadx.kts");
 		Files.writeString(script, "println(\"from-path\")");
 
-		Map<String, Object> pathResult = call(Map.of("script_path", script.toString()));
+		Map<String, Object> pathResult = call(Map.of("class_fqns", List.of("HelloWorld"), "script_path", script.toString()));
 		assertThat(pathResult)
 				.containsEntry("success", true)
 				.containsEntry("source", "path")
@@ -55,7 +53,7 @@ class RunScriptToolTest {
 		assertThat(runner.lastText).isEqualTo("println(\"from-path\")");
 		assertThat(runner.lastPath).isEqualTo(script.toAbsolutePath().normalize());
 
-		Map<String, Object> textResult = call(Map.of("script_text", "println(\"inline\")"));
+		Map<String, Object> textResult = call(Map.of("class_fqns", List.of("HelloWorld"), "script_text", "println(\"inline\")"));
 		assertThat(textResult)
 				.containsEntry("success", true)
 				.containsEntry("source", "text")
@@ -67,9 +65,9 @@ class RunScriptToolTest {
 
 	@Test
 	void requiresExactlyOneValidSource() {
-		assertCode(Map.of(), ToolException.Code.INVALID_ARG);
-		assertCode(Map.of("script_path", "a", "script_text", "b"), ToolException.Code.INVALID_ARG);
-		assertCode(Map.of("script_path", tempDir.resolve("missing.jadx.kts").toString()),
+		assertCode(Map.of("class_fqns", List.of("HelloWorld")), ToolException.Code.INVALID_ARG);
+		assertCode(Map.of("class_fqns", List.of("HelloWorld"), "script_path", "a", "script_text", "b"), ToolException.Code.INVALID_ARG);
+		assertCode(Map.of("class_fqns", List.of("HelloWorld"), "script_path", tempDir.resolve("missing.jadx.kts").toString()),
 				ToolException.Code.NOT_FOUND);
 
 		Path wrongSuffix = tempDir.resolve("script.kts");
@@ -78,13 +76,13 @@ class RunScriptToolTest {
 		} catch (IOException e) {
 			throw new AssertionError(e);
 		}
-		assertCode(Map.of("script_path", wrongSuffix.toString()), ToolException.Code.INVALID_ARG);
+		assertCode(Map.of("class_fqns", List.of("HelloWorld"), "script_path", wrongSuffix.toString()), ToolException.Code.INVALID_ARG);
 	}
 
 	@Test
 	void requiresLoadedProject() {
 		session.close();
-		assertCode(Map.of("script_text", "println(1)"), ToolException.Code.NOT_LOADED);
+		assertCode(Map.of("class_fqns", List.of("HelloWorld"), "script_text", "println(1)"), ToolException.Code.NOT_LOADED);
 		assertThat(runner.calls).isZero();
 	}
 
@@ -98,18 +96,6 @@ class RunScriptToolTest {
 				.isInstanceOf(ToolException.class)
 				.extracting(e -> ((ToolException) e).code())
 				.isEqualTo(code);
-	}
-
-	private Path copyFixtureClass() throws IOException {
-		String resource = "/" + Fixture.class.getName().replace('.', '/') + ".class";
-		Path output = tempDir.resolve("RunScriptToolTest$Fixture.class");
-		try (InputStream in = Fixture.class.getResourceAsStream(resource)) {
-			if (in == null) {
-				throw new IOException("Missing test fixture resource: " + resource);
-			}
-			Files.copy(in, output);
-		}
-		return output;
 	}
 
 	private static final class CapturingRunner implements ScriptRunner {
@@ -133,14 +119,6 @@ class RunScriptToolTest {
 					1,
 					List.of(new ScriptLogEntry("INFO", "done", null)),
 					null);
-		}
-	}
-
-	private static final class Fixture {
-		private int value;
-
-		int read() {
-			return value;
 		}
 	}
 }

@@ -49,18 +49,10 @@ public final class DisassembleTool extends AbstractTool {
 
 	@Override
 	protected Object call(Map<String, Object> args) {
-		if (session.isFast()) {
-			Target target = TargetParser.parse(requireString(args, "target"));
-			return session.withFastScope(Set.of(target.classFqn()), () -> callLoaded(args));
-		}
-		return callLoaded(args);
-	}
-
-	private Object callLoaded(Map<String, Object> args) {
 		Target target = TargetParser.parse(requireString(args, "target"));
 		boolean lineNumbers = optBool(args, "line_numbers", true);
-		return session.read(decompiler -> {
-			JavaClass javaClass = TargetResolver.resolveClass(session, target);
+		return session.withDecompiler(project -> Set.of(target.classFqn()), decompiler -> {
+			JavaClass javaClass = TargetResolver.resolveClass(decompiler, target.classFqn());
 			String classSmali = javaClass.getSmali();
 			String code;
 			String scope;
@@ -70,7 +62,7 @@ public final class DisassembleTool extends AbstractTool {
 				scope = "class";
 				code = classSmali;
 			} else {
-				JavaMethod method = TargetResolver.resolveMethod(session, target);
+				JavaMethod method = TargetResolver.resolveMethod(decompiler, target);
 				String shortId = method.getMethodNode().getMethodInfo().getShortId();
 				descriptor = shortId.substring(shortId.indexOf('('));
 				String body = SmaliMethodExtractor.extract(classSmali, shortId);
