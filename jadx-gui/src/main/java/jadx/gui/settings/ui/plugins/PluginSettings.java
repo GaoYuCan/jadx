@@ -27,7 +27,8 @@ import jadx.api.plugins.options.JadxPluginOptions;
 import jadx.api.plugins.options.OptionDescription;
 import jadx.api.plugins.options.OptionFlag;
 import jadx.api.plugins.options.OptionType;
-import jadx.core.plugins.PluginContext;
+import jadx.core.plugins.AppContext;
+import jadx.core.plugins.PluginRuntime;
 import jadx.core.utils.Utils;
 import jadx.gui.logs.LogOptions;
 import jadx.gui.plugins.context.GuiPluginContext;
@@ -36,7 +37,6 @@ import jadx.gui.settings.JadxSettings;
 import jadx.gui.settings.ui.SettingsGroup;
 import jadx.gui.ui.MainWindow;
 import jadx.gui.utils.NLS;
-import jadx.gui.utils.plugins.CloseablePlugins;
 import jadx.gui.utils.plugins.CollectPlugins;
 import jadx.gui.utils.plugins.SettingsGroupPluginWrap;
 import jadx.gui.utils.ui.DocumentUpdateListener;
@@ -56,12 +56,12 @@ public class PluginSettings {
 	}
 
 	public ISettingsGroup build() {
-		CloseablePlugins collectedPlugins = new CollectPlugins(mainWindow).build();
+		List<PluginRuntime> collectedPlugins = new CollectPlugins(mainWindow).build();
 		ISettingsGroup pluginsGroup = new PluginSettingsGroup(this, mainWindow, collectedPlugins);
-		for (PluginContext context : collectedPlugins.getList()) {
-			ISettingsGroup pluginGroup = addPluginGroup(context);
+		for (PluginRuntime plugin : collectedPlugins) {
+			ISettingsGroup pluginGroup = addPluginGroup(plugin);
 			if (pluginGroup != null) {
-				pluginsGroup.getSubGroups().add(new SettingsGroupPluginWrap(context.getPluginId(), pluginGroup));
+				pluginsGroup.getSubGroups().add(new SettingsGroupPluginWrap(plugin.getPluginId(), pluginGroup));
 			}
 		}
 		return pluginsGroup;
@@ -69,6 +69,11 @@ public class PluginSettings {
 
 	public void addPlugin() {
 		new InstallPluginDialog(mainWindow, this).setVisible(true);
+	}
+
+	private void scheduleGlobalReload(String pluginId) {
+		mainWindow.getGuiPluginsManager().scheduleGlobalUnload(pluginId);
+		mainWindow.getGuiPluginsManager().scheduleGlobalLoad(pluginId);
 	}
 
 	private void requestReload() {
@@ -81,6 +86,7 @@ public class PluginSettings {
 					try {
 						JadxPluginMetadata metadata = JadxPluginsTools.getInstance().install(locationId);
 						LOG.info("Plugin installed: {}", metadata);
+						scheduleGlobalReload(metadata.getPluginId());
 						requestReload();
 					} catch (Exception e) {
 						LOG.error("Plugin install failed", e);
@@ -94,6 +100,7 @@ public class PluginSettings {
 			boolean success = JadxPluginsTools.getInstance().uninstall(pluginId);
 			if (success) {
 				LOG.info("Uninstall complete");
+				mainWindow.getGuiPluginsManager().scheduleGlobalUnload(pluginId);
 				requestReload();
 			} else {
 				LOG.warn("Uninstall failed");
@@ -104,7 +111,14 @@ public class PluginSettings {
 	public void changeDisableStatus(String pluginId, boolean disabled) {
 		mainWindow.getBackgroundExecutor().execute(
 				NLS.str("preferences.plugins.task.status"),
-				() -> JadxPluginsTools.getInstance().changeDisabledStatus(pluginId, disabled),
+				() -> {
+					JadxPluginsTools.getInstance().changeDisabledStatus(pluginId, disabled);
+					if (disabled) {
+						mainWindow.getGuiPluginsManager().scheduleGlobalUnload(pluginId);
+					} else {
+						mainWindow.getGuiPluginsManager().scheduleGlobalLoad(pluginId);
+					}
+				},
 				s -> requestReload());
 	}
 
@@ -112,6 +126,7 @@ public class PluginSettings {
 		mainWindow.getBackgroundExecutor().execute(NLS.str("preferences.plugins.task.updating"), () -> {
 			List<JadxPluginUpdate> updates = JadxPluginsTools.getInstance().updateAll();
 			if (!updates.isEmpty()) {
+				updates.forEach(update -> scheduleGlobalReload(update.getPluginId()));
 				LOG.info("Updates: {}\n  ", Utils.listToString(updates, "\n  "));
 				requestReload();
 			} else {
@@ -120,8 +135,9 @@ public class PluginSettings {
 		});
 	}
 
-	private @Nullable ISettingsGroup addPluginGroup(PluginContext context) {
-		JadxGuiContext guiContext = context.getGuiContext();
+	private @Nullable ISettingsGroup addPluginGroup(PluginRuntime plugin) {
+		AppContext appContext = plugin.getAppContext();
+		JadxGuiContext guiContext = appContext == null ? null : appContext.getGuiContext();
 		if (guiContext instanceof GuiPluginContext) {
 			GuiPluginContext pluginGuiContext = (GuiPluginContext) guiContext;
 			ISettingsGroup customSettingsGroup = pluginGuiContext.getCustomSettingsGroup();
@@ -129,7 +145,7 @@ public class PluginSettings {
 				return customSettingsGroup;
 			}
 		}
-		JadxPluginOptions options = context.getOptions();
+		JadxPluginOptions options = plugin.getOptions();
 		if (options == null) {
 			return null;
 		}
@@ -137,7 +153,7 @@ public class PluginSettings {
 		if (optionsDescriptions.isEmpty()) {
 			return null;
 		}
-		SettingsGroup settingsGroup = new SettingsGroup(context.getPluginInfo().getName());
+		SettingsGroup settingsGroup = new SettingsGroup(plugin.getPluginInfo().getName());
 		addOptions(settingsGroup, optionsDescriptions);
 		return settingsGroup;
 	}

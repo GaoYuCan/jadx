@@ -1,20 +1,33 @@
 package jadx.gui.plugins.context;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 import javax.swing.Action;
+import javax.swing.InputMap;
+import javax.swing.JComponent;
+import javax.swing.KeyStroke;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import jadx.core.plugins.PluginContext;
-import jadx.core.utils.Utils;
+import jadx.api.gui.dock.DockableOptions;
+import jadx.api.gui.dock.JadxDockable;
+import jadx.core.plugins.PluginRuntime;
 import jadx.gui.settings.data.ITabStatePersist;
 import jadx.gui.ui.MainWindow;
+import jadx.gui.ui.action.ActionModel;
 import jadx.gui.ui.codearea.CodeArea;
 import jadx.gui.ui.codearea.JNodePopupBuilder;
+import jadx.gui.ui.dock.PluginDock;
+import jadx.gui.utils.UiUtils;
+import jadx.gui.utils.shortcut.ShortcutsController;
 import jadx.gui.utils.ui.ActionHandler;
 
 public class CommonGuiPluginsContext {
@@ -22,24 +35,31 @@ public class CommonGuiPluginsContext {
 
 	private final MainWindow mainWindow;
 
-	private final GuiPluginsRegistry globalScope = new GuiPluginsRegistry();
 	private final GuiPluginsRegistry projectScope = new GuiPluginsRegistry();
 
-	private final Map<PluginContext, GuiPluginContext> globalPlugins = new HashMap<>();
-	private final Map<PluginContext, GuiPluginContext> projectPlugins = new HashMap<>();
+	// each global plugin has own registry to allow unload
+	private final Map<PluginRuntime, GuiPluginContext> globalPlugins = new ConcurrentSkipListMap<>();
+	private final Map<PluginRuntime, GuiPluginContext> projectPlugins = new HashMap<>();
+
+	// key bindings added to main window, changed only in UI thread
+	private final Map<KeyStroke, KeyBindingEntry> appliedKeyBindings = new ConcurrentHashMap<>();
 
 	public CommonGuiPluginsContext(MainWindow mainWindow) {
 		this.mainWindow = mainWindow;
 	}
 
-	public GuiPluginContext buildForPlugin(PluginContext pluginContext, boolean isGlobalPlugin) {
-		GuiPluginsRegistry registry = isGlobalPlugin ? globalScope : projectScope;
-		GuiPluginContext guiPluginContext = new GuiPluginContext(this, registry, pluginContext);
-		(isGlobalPlugin ? globalPlugins : projectPlugins).put(pluginContext, guiPluginContext);
+	public GuiPluginContext buildForPlugin(PluginRuntime pluginRuntime, boolean isGlobalPlugin) {
+		if (isGlobalPlugin) {
+			GuiPluginContext guiPluginContext = new GuiPluginContext(this, new GuiPluginsRegistry(), pluginRuntime);
+			globalPlugins.put(pluginRuntime, guiPluginContext);
+			return guiPluginContext;
+		}
+		GuiPluginContext guiPluginContext = new GuiPluginContext(this, projectScope, pluginRuntime);
+		projectPlugins.put(pluginRuntime, guiPluginContext);
 		return guiPluginContext;
 	}
 
-	public void copyGlobalPluginData(PluginContext globalContext, PluginContext projectContext) {
+	public void copyGlobalPluginData(PluginRuntime globalContext, PluginRuntime projectContext) {
 		GuiPluginContext globalGuiContext = globalPlugins.get(globalContext);
 		GuiPluginContext projectGuiContext = projectPlugins.get(projectContext);
 		if (globalGuiContext != null && projectGuiContext != null) {
@@ -50,10 +70,105 @@ public class CommonGuiPluginsContext {
 	public void resetProjectScope() {
 		projectScope.clear();
 		projectPlugins.clear();
+		updatePluginEntries();
+	}
+
+	public void removeGlobalPlugin(PluginRuntime pluginRuntime) {
+		GuiPluginContext context = globalPlugins.remove(pluginRuntime);
+		if (context != null) {
+			context.getRegistry().clear();
+		}
+		updatePluginEntries();
+	}
+
+	JadxDockable addDockable(GuiPluginsRegistry registry, String pluginId, DockableOptions options, Supplier<JComponent> content) {
+		PluginDock dock = mainWindow.getDocking().registerPlugin(pluginId + ':' + options.getId(), options, content);
+		registry.getDockables().add(dock);
+		if (options.getKeyBinding() != null) {
+			addKeyBinding(registry, new KeyBindingEntry(dock.getPersistentID(), KeyStroke.getKeyStroke(options.getKeyBinding()),
+					() -> toggle(dock)));
+		}
+		updateDockablesMenu();
+		return dock;
+	}
+
+	private static void toggle(PluginDock dock) {
+		if (dock.isShown()) {
+			dock.hide();
+		} else {
+			dock.show();
+		}
+	}
+
+	private void updateDockablesMenu() {
+		List<PluginDock> docks = new ArrayList<>();
+		for (PluginDock dock : collect(GuiPluginsRegistry::getDockables)) {
+			if (dock.getOptions().isMenuEntry()) {
+				docks.add(dock);
+			}
+		}
+		mainWindow.setPluginDockablesMenu(docks);
+	}
+
+	private void updatePluginEntries() {
 		mainWindow.resetPluginsMenu();
-		for (Action menuAction : globalScope.getMenuActions()) {
+		for (Action menuAction : collect(GuiPluginsRegistry::getMenuActions)) {
 			mainWindow.addToPluginsMenu(menuAction);
 		}
+		updateDockablesMenu();
+		List<KeyBindingEntry> keyBindings = collect(GuiPluginsRegistry::getKeyBindings);
+		UiUtils.uiRun(() -> {
+			JComponent mainPanel = getMainPanel();
+			for (KeyBindingEntry keyBinding : appliedKeyBindings.values()) {
+				getInputMap().remove(keyBinding.getKeyStroke());
+				mainPanel.getActionMap().remove(keyBinding.getId());
+			}
+			appliedKeyBindings.clear();
+			keyBindings.forEach(this::applyKeyBinding);
+		});
+	}
+
+	boolean addKeyBinding(GuiPluginsRegistry registry, KeyBindingEntry keyBinding) {
+		KeyStroke keyStroke = keyBinding.getKeyStroke();
+		for (KeyBindingEntry registered : collect(GuiPluginsRegistry::getKeyBindings)) {
+			if (registered.getKeyStroke().equals(keyStroke)) {
+				return false;
+			}
+		}
+		if (getInputMap().get(keyStroke) != null && !appliedKeyBindings.containsKey(keyStroke)) {
+			// used by jadx-gui
+			return false;
+		}
+		if (isJadxShortcut(keyStroke)) {
+			return false;
+		}
+		registry.getKeyBindings().add(keyBinding);
+		UiUtils.uiRun(() -> applyKeyBinding(keyBinding));
+		return true;
+	}
+
+	private boolean isJadxShortcut(KeyStroke keyStroke) {
+		ShortcutsController shortcutsController = mainWindow.getShortcutsController();
+		for (ActionModel actionModel : ActionModel.values()) {
+			if (keyStroke.equals(shortcutsController.getKeyStroke(actionModel))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void applyKeyBinding(KeyBindingEntry keyBinding) {
+		getInputMap().put(keyBinding.getKeyStroke(), keyBinding.getId());
+		getMainPanel().getActionMap().put(keyBinding.getId(), new ActionHandler(keyBinding.getAction()));
+		appliedKeyBindings.put(keyBinding.getKeyStroke(), keyBinding);
+	}
+
+	private JComponent getMainPanel() {
+		return (JComponent) mainWindow.getContentPane();
+	}
+
+	private InputMap getInputMap() {
+		return getMainPanel().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
 	}
 
 	public MainWindow getMainWindow() {
@@ -61,19 +176,28 @@ public class CommonGuiPluginsContext {
 	}
 
 	public List<CodePopupAction> getCodePopupActionList() {
-		return Utils.mergeLists(globalScope.getCodePopupActions(), projectScope.getCodePopupActions());
+		return collect(GuiPluginsRegistry::getCodePopupActions);
 	}
 
 	public List<TreePopupMenuEntry> getTreePopupMenuEntries() {
-		return Utils.mergeLists(globalScope.getTreePopupMenuEntries(), projectScope.getTreePopupMenuEntries());
+		return collect(GuiPluginsRegistry::getTreePopupMenuEntries);
 	}
 
 	public List<ITreeInputCategory> getTreeInputCategories() {
-		return Utils.mergeLists(globalScope.getTreeInputCategories(), projectScope.getTreeInputCategories());
+		return collect(GuiPluginsRegistry::getTreeInputCategories);
 	}
 
 	public List<ITabStatePersist> getTabStatePersistAdapters() {
-		return Utils.mergeLists(globalScope.getTabStatePersistAdapters(), projectScope.getTabStatePersistAdapters());
+		return collect(GuiPluginsRegistry::getTabStatePersistAdapters);
+	}
+
+	private <T> List<T> collect(Function<GuiPluginsRegistry, List<T>> getter) {
+		List<T> list = new ArrayList<>();
+		for (GuiPluginContext globalPlugin : globalPlugins.values()) {
+			list.addAll(getter.apply(globalPlugin.getRegistry()));
+		}
+		list.addAll(getter.apply(projectScope));
+		return list;
 	}
 
 	void addMenuAction(GuiPluginsRegistry registry, String name, Runnable action) {
@@ -98,5 +222,9 @@ public class CommonGuiPluginsContext {
 		for (CodePopupAction codePopupAction : codePopupActionList) {
 			popup.add(codePopupAction.buildAction(codeArea));
 		}
+	}
+
+	boolean isGlobalPlugin(GuiPluginContext guiPluginContext) {
+		return globalPlugins.containsValue(guiPluginContext);
 	}
 }

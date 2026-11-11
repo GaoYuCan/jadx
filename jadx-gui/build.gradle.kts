@@ -19,6 +19,7 @@ dependencies {
 
 	// import mappings
 	implementation(project(":jadx-plugins:jadx-rename-mappings"))
+	implementation(project(":jadx-plugins:jadx-java-input"))
 
 	implementation(libs.jcommander)
 	implementation(libs.logback.classic)
@@ -30,6 +31,8 @@ dependencies {
 	implementation(libs.imageio.webp) // WebP support for image viewer
 
 	implementation(libs.bundles.flatlaf)
+	implementation(libs.moderndocking.single.app)
+	implementation(libs.moderndocking.ui)
 
 	implementation(libs.gson)
 	implementation(libs.commons.lang3)

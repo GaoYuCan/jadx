@@ -294,6 +294,10 @@ public class SimplifyVisitor extends AbstractVisitor {
 			InsnNode wi = ((InsnWrapArg) f).getWrapInsn();
 			if (wi.getType() == InsnType.CMP_L || wi.getType() == InsnType.CMP_G) {
 				if (insn.getArg(1).isZeroLiteral()) {
+					if (IfCondition.isFloatCmp(wi)) {
+						// keep 'cmp' to not lose NaN handling, see ConditionGen.addFloatCmpCompare()
+						return;
+					}
 					insn.changeCondition(insn.getOp(), wi.getArg(0).duplicate(), wi.getArg(1).duplicate());
 					InsnRemover.unbindInsn(mth, wi);
 				} else {
@@ -410,19 +414,6 @@ public class SimplifyVisitor extends AbstractVisitor {
 					return null;
 				}
 				args.add(arg);
-			}
-
-			boolean stringArgFound = false;
-			for (InsnArg arg : args) {
-				if (arg.getType().equals(ArgType.STRING)) {
-					stringArgFound = true;
-					break;
-				}
-			}
-			if (!stringArgFound) {
-				String argStr = Utils.listToString(args, InsnArg::toShortString);
-				mth.addDebugComment("TODO: convert one arg to string using `String.valueOf()`, args: " + argStr);
-				return null;
 			}
 
 			// all check passed

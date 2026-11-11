@@ -48,7 +48,7 @@ public class JadxCLIArgs implements IJadxConfig {
 	private static final Logger LOG = LoggerFactory.getLogger(JadxCLIArgs.class);
 
 	@JadxConfigExclude
-	@Parameter(description = "<input files> (.apk, .dex, .jar, .class, .smali, .zip, .aar, .arsc, .aab, .xapk, .apkm, .jadx.kts)")
+	@Parameter(description = "<input files> (.apk, .dex, .jar, .class, .smali, .zip, .aar, .arsc, .aab, .xapk, .apkm, .apks, .jadx.kts)")
 	protected List<String> files = Collections.emptyList();
 
 	@JadxConfigExclude
@@ -69,7 +69,7 @@ public class JadxCLIArgs implements IJadxConfig {
 	@Parameter(names = { "-s", "--no-src" }, description = "do not decompile source code")
 	protected boolean skipSources = false;
 
-	@Parameter(names = { "-j", "--threads-count" }, description = "processing threads count")
+	@Parameter(names = { "-j", "--threads-count" }, description = "processing threads count, default: half of CPU threads")
 	protected int threadsCount = JadxArgs.DEFAULT_THREADS_COUNT;
 
 	@JadxConfigExclude
@@ -162,7 +162,8 @@ public class JadxCLIArgs implements IJadxConfig {
 					+ "\n 'read' - just read, user can always save manually (default)"
 					+ "\n 'read-and-autosave-every-change' - read and autosave after every change"
 					+ "\n 'read-and-autosave-before-closing' - read and autosave before exiting the app or closing the project"
-					+ "\n 'ignore' - don't read or save (can be used to skip loading mapping files referenced in the project file)"
+					+ "\n 'ignore' - don't read or save (can be used to skip loading mapping files referenced in the project file)",
+			converter = UserRenamesMappingsModeConverter.class
 	)
 	protected UserRenamesMappingsMode userRenamesMappingsMode = UserRenamesMappingsMode.getDefault();
 
@@ -466,7 +467,7 @@ public class JadxCLIArgs implements IJadxConfig {
 		args.setOutDir(FileUtils.toFile(outDir));
 		args.setOutDirSrc(FileUtils.toFile(outDirSrc));
 		args.setOutDirRes(FileUtils.toFile(outDirRes));
-		args.setOutputFormat(JadxArgs.OutputFormatEnum.valueOf(outputFormat.toUpperCase()));
+		args.setOutputFormat(JadxArgs.OutputFormatEnum.valueOf(outputFormat.toUpperCase(Locale.ROOT)));
 		args.setThreadsCount(threadsCount);
 		args.setSkipSources(skipSources);
 		args.setSkipResources(skipResources);
@@ -992,6 +993,12 @@ public class JadxCLIArgs implements IJadxConfig {
 	public static class UseKotlinMethodsForVarNamesConverter extends BaseEnumConverter<UseKotlinMethodsForVarNames> {
 		public UseKotlinMethodsForVarNamesConverter() {
 			super(UseKotlinMethodsForVarNames::valueOf, UseKotlinMethodsForVarNames::values);
+		}
+	}
+
+	public static class UserRenamesMappingsModeConverter extends BaseEnumConverter<UserRenamesMappingsMode> {
+		public UserRenamesMappingsModeConverter() {
+			super(UserRenamesMappingsMode::valueOf, UserRenamesMappingsMode::values);
 		}
 	}
 

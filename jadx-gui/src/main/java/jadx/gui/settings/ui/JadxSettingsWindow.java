@@ -12,6 +12,8 @@ import java.awt.datatransfer.StringSelection;
 import java.awt.event.ItemEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -72,7 +74,6 @@ import jadx.gui.settings.ui.shortcut.ShortcutsSettingsGroup;
 import jadx.gui.ui.MainWindow;
 import jadx.gui.ui.codearea.theme.EditorThemeManager;
 import jadx.gui.ui.codearea.theme.ThemeIdAndName;
-import jadx.gui.ui.tab.dnd.TabDndGhostType;
 import jadx.gui.utils.FontUtils;
 import jadx.gui.utils.LafManager;
 import jadx.gui.utils.LangLocale;
@@ -88,7 +89,7 @@ public class JadxSettingsWindow extends JDialog {
 	private final transient MainWindow mainWindow;
 	private final transient JadxSettings settings;
 	private final transient String startSettings;
-	private final transient String startSettingsHash;
+	private transient String startSettingsHash;
 	private final transient LangLocale prevLang;
 	private final transient Consumer<ReloadSettingsWindow> reloadListener;
 
@@ -107,7 +108,13 @@ public class JadxSettingsWindow extends JDialog {
 		initUI();
 
 		setTitle(NLS.str("preferences.title"));
-		setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+		setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+		addWindowListener(new WindowAdapter() {
+			@Override
+			public void windowClosing(WindowEvent e) {
+				cancel();
+			}
+		});
 		setModalityType(ModalityType.APPLICATION_MODAL);
 		pack();
 		UiUtils.setWindowIcons(this);
@@ -120,6 +127,8 @@ public class JadxSettingsWindow extends JDialog {
 	}
 
 	private void reloadUI() {
+		// project already reloaded with current settings and plugins
+		startSettingsHash = calcSettingsHash();
 		int[] selection = tree.getSelectionRows();
 		closeGroups(false);
 		getContentPane().removeAll();
@@ -445,14 +454,6 @@ public class JadxSettingsWindow extends JDialog {
 		group.addRow(NLS.str("preferences.laf_theme"), lafCbx);
 		group.addRow(NLS.str("preferences.theme"), themesCbx);
 
-		JComboBox<TabDndGhostType> tabDndGhostTypeCbx = new JComboBox<>(TabDndGhostType.values());
-		tabDndGhostTypeCbx.setSelectedItem(settings.getTabDndGhostType());
-		tabDndGhostTypeCbx.addActionListener(e -> {
-			settings.setTabDndGhostType((TabDndGhostType) tabDndGhostTypeCbx.getSelectedItem());
-			mainWindow.loadSettings();
-		});
-		group.addRow(NLS.str("preferences.tab_dnd_appearance"), tabDndGhostTypeCbx);
-
 		return group;
 	}
 
@@ -765,15 +766,12 @@ public class JadxSettingsWindow extends JDialog {
 	private void save() {
 		closeGroups(true);
 		settings.sync();
+		mainWindow.getGuiPluginsManager().updateGlobalPluginsOptions();
 		enableComponents(this, false);
 		SwingUtilities.invokeLater(() -> {
 			if (shouldReload()) {
 				mainWindow.getShortcutsController().loadSettings();
-				if (mainWindow.getProject().getFilePaths().isEmpty()) {
-					mainWindow.reloadMenuShortcuts();
-				} else {
-					mainWindow.reopen();
-				}
+				mainWindow.reopen();
 			}
 			if (!settings.getLangLocale().equals(prevLang)) {
 				JOptionPane.showMessageDialog(

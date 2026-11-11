@@ -4,10 +4,11 @@ import java.awt.Container;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import javax.swing.ImageIcon;
+import javax.swing.JComponent;
 import javax.swing.JFrame;
-import javax.swing.JPanel;
 import javax.swing.KeyStroke;
 
 import org.jetbrains.annotations.Nullable;
@@ -18,6 +19,8 @@ import jadx.api.JadxDecompiler;
 import jadx.api.JavaClass;
 import jadx.api.JavaNode;
 import jadx.api.gui.IMainWindow;
+import jadx.api.gui.dock.DockableOptions;
+import jadx.api.gui.dock.JadxDockable;
 import jadx.api.gui.plugins.JadxGuiContextExt;
 import jadx.api.gui.tree.ITreeNode;
 import jadx.api.metadata.ICodeNodeRef;
@@ -26,7 +29,10 @@ import jadx.api.plugins.events.types.NodeRenamedByUser;
 import jadx.api.plugins.gui.ISettingsGroup;
 import jadx.api.plugins.gui.JadxGuiSettings;
 import jadx.api.plugins.options.JadxPluginOptions;
+import jadx.api.plugins.options.OptionDescription;
+import jadx.api.plugins.options.OptionFlag;
 import jadx.core.plugins.PluginContext;
+import jadx.core.plugins.PluginRuntime;
 import jadx.core.utils.exceptions.JadxRuntimeException;
 import jadx.gui.settings.data.ITabStatePersist;
 import jadx.gui.treemodel.JNode;
@@ -43,14 +49,14 @@ public class GuiPluginContext implements JadxGuiContextExt {
 
 	private final CommonGuiPluginsContext commonContext;
 	private final GuiPluginsRegistry registry;
-	private final PluginContext pluginContext;
+	private final PluginRuntime pluginRuntime;
 
 	private @Nullable ISettingsGroup customSettingsGroup;
 
-	GuiPluginContext(CommonGuiPluginsContext commonContext, GuiPluginsRegistry registry, PluginContext pluginContext) {
+	GuiPluginContext(CommonGuiPluginsContext commonContext, GuiPluginsRegistry registry, PluginRuntime pluginRuntime) {
 		this.commonContext = commonContext;
 		this.registry = registry;
-		this.pluginContext = pluginContext;
+		this.pluginRuntime = pluginRuntime;
 	}
 
 	@Override
@@ -60,18 +66,32 @@ public class GuiPluginContext implements JadxGuiContextExt {
 
 	@Override
 	public void registerOptions(JadxPluginOptions options) {
-		pluginContext.registerOptions(options);
+		if (options != null && commonContext.isGlobalPlugin(this)) {
+			verifyGlobalOptions(options);
+		}
+		pluginRuntime.registerOptions(options);
 	}
 
 	public CommonGuiPluginsContext getCommonContext() {
 		return commonContext;
 	}
 
-	public String getPluginId() {
-		return pluginContext.getPluginId();
+	GuiPluginsRegistry getRegistry() {
+		return registry;
 	}
 
-	public PluginContext getPluginContext() {
+	public String getPluginId() {
+		return pluginRuntime.getPluginId();
+	}
+
+	/**
+	 * Internal method with plugin load guard
+	 */
+	PluginContext getPluginContext() {
+		PluginContext pluginContext = pluginRuntime.getPluginContext();
+		if (pluginContext == null) {
+			throw new JadxRuntimeException("Plugin not yet loaded");
+		}
 		return pluginContext;
 	}
 
@@ -110,18 +130,17 @@ public class GuiPluginContext implements JadxGuiContextExt {
 	}
 
 	@Override
+	public JadxDockable addDockable(DockableOptions options, Supplier<JComponent> content) {
+		return commonContext.addDockable(registry, getPluginId(), options, content);
+	}
+
+	@Override
 	public boolean registerGlobalKeyBinding(String id, String keyBinding, Runnable action) {
 		KeyStroke keyStroke = KeyStroke.getKeyStroke(keyBinding);
 		if (keyStroke == null) {
 			throw new IllegalArgumentException("Failed to parse key binding: " + keyBinding);
 		}
-		JPanel mainPanel = (JPanel) commonContext.getMainWindow().getContentPane();
-		Object prevBinding = mainPanel.getInputMap().get(keyStroke);
-		if (prevBinding != null) {
-			return false;
-		}
-		UiUtils.addKeyBinding(mainPanel, keyStroke, id, action);
-		return true;
+		return commonContext.addKeyBinding(registry, new KeyBindingEntry(id, keyStroke, action));
 	}
 
 	@Override
@@ -267,5 +286,13 @@ public class GuiPluginContext implements JadxGuiContextExt {
 		}
 		IJadxEvents events = commonContext.getMainWindow().events();
 		events.send(new NodeRenamedByUser(nodeRef, "", newName));
+	}
+
+	private static void verifyGlobalOptions(JadxPluginOptions options) {
+		for (OptionDescription option : options.getOptionsDescriptions()) {
+			if (option.getFlags().contains(OptionFlag.PER_PROJECT)) {
+				throw new IllegalArgumentException("Per project option not allowed in global plugin: " + option.name());
+			}
+		}
 	}
 }

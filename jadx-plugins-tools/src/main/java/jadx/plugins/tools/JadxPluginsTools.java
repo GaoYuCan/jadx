@@ -13,6 +13,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -169,7 +170,7 @@ public class JadxPluginsTools {
 			return false;
 		}
 		JadxPluginMetadata plugin = found.get();
-		deletePlugin(plugin);
+		deletePlugin(plugins, plugin);
 		plugins.getInstalled().remove(plugin);
 		savePluginsJson(plugins);
 		return true;
@@ -194,8 +195,10 @@ public class JadxPluginsTools {
 	}
 
 	public List<Path> getEnabledPluginPaths() {
+		JadxInstalledPlugins plugins = loadPluginsJson();
+		deleteLeftoverFiles(plugins);
 		List<Path> list = new ArrayList<>();
-		for (JadxPluginMetadata pluginMetadata : loadPluginsJson().getInstalled()) {
+		for (JadxPluginMetadata pluginMetadata : plugins.getInstalled()) {
 			if (pluginMetadata.isDisabled()) {
 				continue;
 			}
@@ -257,13 +260,12 @@ public class JadxPluginsTools {
 		String pluginPathStr = metadata.getPath();
 		Path pluginPath = Paths.get(pluginPathStr);
 		if (pluginPathStr.endsWith(".jar")) {
-			Path pluginJar = INSTALLED_DIR.resolve(pluginBaseName + ".jar");
+			Path pluginJar = newPluginPath(pluginBaseName, ".jar");
 			copyJar(pluginPath, pluginJar);
 			metadata.setPath(INSTALLED_DIR.relativize(pluginJar).toString());
 		} else if (Files.isDirectory(pluginPath)) {
-			Path pluginDir = INSTALLED_DIR.resolve(pluginBaseName);
+			Path pluginDir = newPluginPath(pluginBaseName, "");
 			try {
-				FileUtils.deleteDirIfExists(pluginDir);
 				org.apache.commons.io.FileUtils.moveDirectory(pluginPath.toFile(), pluginDir.toFile());
 			} catch (IOException e) {
 				throw new JadxRuntimeException("Failed to install plugin: " + pluginBaseName, e);
@@ -274,9 +276,20 @@ public class JadxPluginsTools {
 		}
 		// update plugins json
 		JadxInstalledPlugins plugins = loadPluginsJson();
+		plugins.getToDelete().remove(metadata.getPath());
 		plugins.getInstalled().add(metadata);
 		plugins.setUpdated(System.currentTimeMillis());
 		savePluginsJson(plugins);
+	}
+
+	private static Path newPluginPath(String baseName, String ext) {
+		while (true) {
+			String suffix = String.format("%06x", ThreadLocalRandom.current().nextInt(0x1000000));
+			Path path = INSTALLED_DIR.resolve(baseName + '-' + suffix + ext);
+			if (!Files.exists(path)) {
+				return path;
+			}
+		}
 	}
 
 	private void fillMetadata(JadxPluginMetadata metadata) {
@@ -328,17 +341,37 @@ public class JadxPluginsTools {
 		}
 	}
 
-	private void deletePlugin(JadxPluginMetadata plugin) {
+	private void deletePlugin(JadxInstalledPlugins plugins, JadxPluginMetadata plugin) {
+		String path = plugin.getPath();
+		if (!deletePluginFiles(path)) {
+			// on Windows, files of loaded plugins can not be deleted
+			LOG.warn("Failed to delete plugin files, will try again on next load: {}", INSTALLED_DIR.resolve(path));
+			plugins.getToDelete().add(path);
+		}
+	}
+
+	public void deleteLeftoverFiles() {
+		deleteLeftoverFiles(loadPluginsJson());
+	}
+
+	private void deleteLeftoverFiles(JadxInstalledPlugins plugins) {
+		if (plugins.getToDelete().removeIf(JadxPluginsTools::deletePluginFiles)) {
+			savePluginsJson(plugins);
+		}
+	}
+
+	private static boolean deletePluginFiles(String path) {
+		Path pluginPath = INSTALLED_DIR.resolve(path);
 		try {
-			Path pluginPath = INSTALLED_DIR.resolve(plugin.getPath());
 			if (Files.isDirectory(pluginPath)) {
 				FileUtils.deleteDir(pluginPath);
 			} else {
 				Files.deleteIfExists(pluginPath);
 			}
-		} catch (IOException e) {
-			// ignore
+		} catch (Exception e) {
+			LOG.debug("Failed to delete plugin files: {}", pluginPath, e);
 		}
+		return !Files.exists(pluginPath);
 	}
 
 	private JadxInstalledPlugins loadPluginsJson() {
@@ -357,7 +390,7 @@ public class JadxPluginsTools {
 	}
 
 	private void savePluginsJson(JadxInstalledPlugins data) {
-		if (data.getInstalled().isEmpty()) {
+		if (data.getInstalled().isEmpty() && data.getToDelete().isEmpty()) {
 			try {
 				Files.deleteIfExists(PLUGINS_JSON);
 			} catch (Exception e) {

@@ -11,7 +11,6 @@ import jadx.api.JadxArgs;
 import jadx.core.deobf.DeobfuscatorVisitor;
 import jadx.core.deobf.SaveDeobfMapping;
 import jadx.core.dex.attributes.AFlag;
-import jadx.core.dex.visitors.AdjustForIfMergeVisitor;
 import jadx.core.dex.visitors.AnonymousClassVisitor;
 import jadx.core.dex.visitors.ApplyVariableNames;
 import jadx.core.dex.visitors.AttachCommentsVisitor;
@@ -26,6 +25,7 @@ import jadx.core.dex.visitors.DotGraphVisitor;
 import jadx.core.dex.visitors.EnumVisitor;
 import jadx.core.dex.visitors.ExtractFieldInit;
 import jadx.core.dex.visitors.FallbackModeVisitor;
+import jadx.core.dex.visitors.FixInstructionsVisitor;
 import jadx.core.dex.visitors.FixSwitchOverEnum;
 import jadx.core.dex.visitors.GenericTypesVisitor;
 import jadx.core.dex.visitors.IDexTreeVisitor;
@@ -53,6 +53,7 @@ import jadx.core.dex.visitors.debuginfo.DebugInfoApplyVisitor;
 import jadx.core.dex.visitors.debuginfo.DebugInfoAttachVisitor;
 import jadx.core.dex.visitors.finaly.MarkFinallyVisitor;
 import jadx.core.dex.visitors.fixaccessmodifiers.FixAccessModifiers;
+import jadx.core.dex.visitors.fixaccessmodifiers.PrepareAccessFlags;
 import jadx.core.dex.visitors.gradle.NonFinalResIdsVisitor;
 import jadx.core.dex.visitors.kotlin.ProcessKotlinInternals;
 import jadx.core.dex.visitors.prepare.AddAndroidConstants;
@@ -100,6 +101,7 @@ public class Jadx {
 
 	public static List<IDexTreeVisitor> getPreDecompilePassesList() {
 		List<IDexTreeVisitor> passes = new ArrayList<>();
+		passes.add(new PrepareAccessFlags());
 		passes.add(new SignatureProcessor());
 		passes.add(new OverrideMethodVisitor());
 		passes.add(new AddAndroidConstants());
@@ -154,7 +156,8 @@ public class Jadx {
 		passes.add(new FixTypesVisitor());
 		passes.add(new FinishTypeInference());
 
-		passes.add(new AdjustForIfMergeVisitor());
+		// TODO: disabled until issue resolved, check TODO comment inside
+		// passes.add(new AdjustForIfMergeVisitor());
 
 		if (args.getUseKotlinMethodsForVarNames() != JadxArgs.UseKotlinMethodsForVarNames.DISABLE) {
 			passes.add(new ProcessKotlinInternals());
@@ -189,6 +192,7 @@ public class Jadx {
 		passes.add(new MethodInvokeVisitor());
 		passes.add(new SimplifyVisitor());
 		passes.add(new CheckRegions());
+		passes.add(new FixInstructionsVisitor());
 
 		passes.add(new EnumVisitor());
 		passes.add(new FixSwitchOverEnum());

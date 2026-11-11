@@ -6,6 +6,7 @@ import java.util.List;
 import javax.swing.Action;
 
 import jadx.gui.settings.data.ITabStatePersist;
+import jadx.gui.ui.dock.PluginDock;
 
 public class GuiPluginsRegistry {
 
@@ -14,6 +15,8 @@ public class GuiPluginsRegistry {
 	private final List<TreePopupMenuEntry> treePopupMenuEntries = new ArrayList<>();
 	private final List<ITreeInputCategory> treeInputCategories = new ArrayList<>();
 	private final List<ITabStatePersist> tabStatePersistAdapters = new ArrayList<>();
+	private final List<KeyBindingEntry> keyBindings = new ArrayList<>();
+	private final List<PluginDock> dockables = new ArrayList<>();
 
 	public List<Action> getMenuActions() {
 		return menuActions;
@@ -35,11 +38,22 @@ public class GuiPluginsRegistry {
 		return tabStatePersistAdapters;
 	}
 
+	public List<KeyBindingEntry> getKeyBindings() {
+		return keyBindings;
+	}
+
+	public List<PluginDock> getDockables() {
+		return dockables;
+	}
+
 	public void clear() {
 		menuActions.clear();
 		codePopupActions.clear();
 		treePopupMenuEntries.clear();
 		treeInputCategories.clear();
 		tabStatePersistAdapters.clear();
+		keyBindings.clear();
+		dockables.forEach(PluginDock::remove);
+		dockables.clear();
 	}
 }
