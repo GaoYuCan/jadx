@@ -22,6 +22,7 @@ import jadx.api.JadxDecompiler;
 import jadx.api.plugins.JadxPluginContext;
 import jadx.api.plugins.options.JadxPluginOptions;
 import jadx.core.plugins.PluginContext;
+import jadx.core.plugins.PluginRuntime;
 import jadx.mcp.util.ToolException;
 
 /**
@@ -40,8 +41,13 @@ public final class KotlinScriptRunner implements ScriptRunner {
 
 	@Override
 	public ScriptRunResult run(JadxDecompiler decompiler, Path scriptPath) {
-		PluginContext pluginContext = findPluginContext(decompiler);
-		ClassLoader pluginClassLoader = pluginContext.getPluginInstance().getClass().getClassLoader();
+		PluginRuntime plugin = findPlugin(decompiler);
+		PluginContext pluginContext = plugin.getPluginContext();
+		if (pluginContext == null) {
+			throw new ToolException(ToolException.Code.UNSUPPORTED,
+					"The `" + PLUGIN_ID + "` plugin failed to initialize.");
+		}
+		ClassLoader pluginClassLoader = plugin.getPluginInstance().getClass().getClassLoader();
 		File scriptFile = scriptPath.toFile();
 		String scriptName = removeSuffix(scriptFile.getName(), SCRIPT_SUFFIX);
 		CapturingAppender appender = new CapturingAppender();
@@ -61,7 +67,7 @@ public final class KotlinScriptRunner implements ScriptRunner {
 		try {
 			inputFiles.removeIf(file -> file.getName().endsWith(SCRIPT_SUFFIX));
 			inputFiles.add(scriptFile);
-			pluginContext.classLoaderWrap(() -> execute(
+			plugin.classLoaderWrap(() -> execute(
 					decompiler,
 					pluginContext,
 					pluginClassLoader,
@@ -94,9 +100,9 @@ public final class KotlinScriptRunner implements ScriptRunner {
 				error);
 	}
 
-	private static PluginContext findPluginContext(JadxDecompiler decompiler) {
-		return decompiler.getPluginManager().getResolvedPluginContexts().stream()
-				.filter(context -> PLUGIN_ID.equals(context.getPluginId()))
+	private static PluginRuntime findPlugin(JadxDecompiler decompiler) {
+		return decompiler.getPluginManager().getResolvedPlugins().stream()
+				.filter(plugin -> PLUGIN_ID.equals(plugin.getPluginId()))
 				.findFirst()
 				.orElseThrow(() -> new ToolException(
 						ToolException.Code.UNSUPPORTED,

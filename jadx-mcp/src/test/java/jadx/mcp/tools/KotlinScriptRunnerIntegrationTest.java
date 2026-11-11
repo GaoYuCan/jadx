@@ -32,9 +32,9 @@ class KotlinScriptRunnerIntegrationTest {
 	void executesPathAndInlineAfterLoadAgainstCurrentDecompilerWhenPluginIsInstalled() throws Exception {
 		session.load(Path.of("../jadx-cli/src/test/resources/samples/hello.dex").toFile());
 		boolean pluginInstalled = session.withDecompiler(project -> Set.of("HelloWorld"), decompiler -> decompiler.getPluginManager()
-				.getResolvedPluginContexts()
+				.getResolvedPlugins()
 				.stream()
-				.anyMatch(context -> context.getPluginId().equals("jadx-script-kotlin")));
+				.anyMatch(plugin -> plugin.getPluginId().equals("jadx-script-kotlin")));
 		Assumptions.assumeTrue(pluginInstalled, "jadx-script-kotlin is not installed");
 
 		Path script = tempDir.resolve("integration.jadx.kts");
